@@ -194,6 +194,7 @@ test("事件处理通过官方 agent.prompt 直达下一角色并写入共享记
       ].join("\n"),
       "utf8"
     );
+    writeFileSync(join(configDir, "workflow-plan.md"), "# 本轮真实计划\n\n只审查当前工作树。", "utf8");
     startWorkflow(project, "default");
     const result = await handleEvent({
       env: {
@@ -227,6 +228,7 @@ test("事件处理通过官方 agent.prompt 直达下一角色并写入共享记
 
     assert.equal(result.delivery, "agent.prompt");
     assert.equal(calls.some((call) => call.method === "agent.prompt" && call.params.target === "w1:p3"), true);
+    assert.match(calls.find((call) => call.method === "agent.prompt").params.text, /只审查当前工作树/);
     const ledger = readFileSync(join(configDir, "workflow-events.jsonl"), "utf8");
     assert.match(ledger, /implementation_done/);
     assert.match(ledger, /agent\.prompt/);

@@ -1,6 +1,6 @@
 id = "wgy.herdr-workflows-bridge"
 name = "Herdr Workflows Event Bridge"
-version = "0.2.2"
+version = "0.2.3"
 min_herdr_version = "0.7.0"
 description = "Route Herdr agent completion and blocked events directly between configured workflow roles."
 platforms = ["linux", "macos", "windows"]

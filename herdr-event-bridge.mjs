@@ -132,21 +132,25 @@ function roleLabel(role) {
 }
 
 /** 生成发送给目标 Agent 的短通知，正文不要求 Leader 参与转发。 */
-export function buildNotification({ fromRole, toRole, reason, event, ledgerPath }) {
+export function buildNotification({ fromRole, toRole, reason, event, ledgerPath, planPath, planContent }) {
   const action =
     reason === "implementation_done"
       ? "请直接开始审查，不要等待 Leader 转发。"
       : reason === "review_done"
         ? "请直接读取评审单并作出最终裁决，不要等待 Codex 中间转发。"
         : "请直接处理阻塞原因并决定下一步，不要等待其他 Agent 转发。";
-  return [
+  const notification = [
     "【Herdr Workflows 自动通知】",
     `${roleLabel(fromRole)}已达到 ${event.status} 状态。`,
     `当前路由：${roleLabel(fromRole)} → ${roleLabel(toRole)}。`,
     `pane=${event.paneId ?? "unknown"}，workspace=${event.workspaceId ?? "unknown"}。`,
     action,
     `共享事件记录：${ledgerPath}`,
-  ].join(" ");
+  ];
+  if (planContent) {
+    notification.push(`共享工作计划（请以此为准）：${planPath ?? "workflow-plan.md"}\n${planContent}`);
+  }
+  return notification.join(" ");
 }
 
 /** 只对带有 Herdr 状态序号的事件去重，避免吞掉没有序号的合法后续事件。 */
@@ -438,7 +442,9 @@ export async function handleEvent(options = {}) {
     }
     const targetAgent = workflow[route.toRole];
     const target = findAgentTarget(agents, targetAgent, event.workspaceId);
-    const message = buildNotification({ ...route, event, ledgerPath });
+    const planPath = join(projectRoot, ".herdr", "workflow-plan.md");
+    const planContent = existsSync(planPath) ? readFileSync(planPath, "utf8").trim() : "";
+    const message = buildNotification({ ...route, event, ledgerPath, planPath, planContent });
     try {
       if (!target || target === event.paneId) throw new Error("当前 workspace 中找不到目标 Agent");
       await request("agent.prompt", { target, text: message });
