@@ -50,6 +50,8 @@ test("插件默认工作流不预设 Codex 或其他 Agent 为 Leader", () => {
   assert.equal(workflow.leader, null);
   assert.equal(workflow.implementer, null);
   assert.equal(workflow.reviewer, null);
+  assert.equal(workflow.role_rotation.enabled, false);
+  assert.equal(workflow.role_rotation.interval_minutes, 120);
 });
 
 test("init 入口声明配置、Superpowers 与 Agent 直连能力", () => {
@@ -60,6 +62,48 @@ test("init 入口声明配置、Superpowers 与 Agent 直连能力", () => {
   assert.match(workflowsSkill, /Superpowers/);
   assert.match(workflowsSkill, /agent\.prompt/);
   assert.match(workflowsSkill, /agent\.send_keys/);
+  assert.match(workflowsSkill, /role_rotation/);
+  assert.match(workflowsSkill, /模型能力不要差距过大/);
+});
+
+test("角色轮换配置合并并保留 Agent 能力等级", () => {
+  const defaults = {
+    ...DEFAULTS,
+    workflows: {
+      ...DEFAULTS.workflows,
+      "opencode-implement-claude-review": {
+        ...DEFAULTS.workflows["opencode-implement-claude-review"],
+        role_rotation: {
+          enabled: false,
+          interval_minutes: 120,
+          max_switches: 2,
+          capability_gap_warning: true,
+        },
+      },
+    },
+  };
+  const project = {
+    default_workflow: "opencode-implement-claude-review",
+    workflows: {
+      "opencode-implement-claude-review": {
+        role_rotation: { enabled: true, interval_minutes: 60, max_switches: 1 },
+      },
+    },
+  };
+  const merged = mergeConfig(
+    defaults,
+    { agents: { opencode: { capability_tier: 4 }, claude: { capability_tier: 3 } } },
+    project,
+    {}
+  );
+  assert.deepEqual(merged.workflow.roleRotation, {
+    enabled: true,
+    intervalMinutes: 60,
+    maxSwitches: 1,
+    capabilityGapWarning: true,
+  });
+  assert.equal(merged.agents.opencode.capabilityTier, 4);
+  assert.equal(merged.agents.claude.capabilityTier, 3);
 });
 
 test("项目配置覆盖全局角色但保留全局启动参数", () => {
@@ -157,6 +201,18 @@ test("已知字段类型错误仍拒绝", () => {
   assert.ok(
     globalErrors.some((error) => error.includes("elevated_args")),
     `已知字段类型错误未被拒绝，实际错误：${JSON.stringify(globalErrors)}`
+  );
+  const capabilityErrors = validateGlobalConfig({ agents: { claude: { capability_tier: 6 } } });
+  assert.ok(
+    capabilityErrors.some((error) => error.includes("capability_tier")),
+    `能力等级越界未被拒绝，实际错误：${JSON.stringify(capabilityErrors)}`
+  );
+  const rotationErrors = validateProjectConfig({
+    workflows: { demo: { role_rotation: { interval_minutes: 0 } } },
+  });
+  assert.ok(
+    rotationErrors.some((error) => error.includes("role_rotation.interval_minutes")),
+    `轮换间隔错误未被拒绝，实际错误：${JSON.stringify(rotationErrors)}`
   );
 });
 

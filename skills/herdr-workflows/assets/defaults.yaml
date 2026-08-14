@@ -12,3 +12,9 @@ workflows:
     # 最大返修 5 次，超过上限由 Leader 接管。
     max_rework: 5
     takeover_on_exceed: leader
+    # 默认不轮换实施者与审查者；开启后由 Leader 只在阶段边界作决定。
+    role_rotation:
+      enabled: false
+      interval_minutes: 120
+      max_switches: 2
+      capability_gap_warning: true

@@ -127,7 +127,7 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
    并校验；不得把 API Key、Token、密码或其他秘密写入配置。
 6. 使用同一个结构化 `update` 工具创建或更新项目 `<repo>/.herdr/workflows.yaml`：设置
    `default_workflow`、所选工作流的 `leader`/`implementer`/`reviewer`、审查只读约束、返修
-   次数和通过条件；不得手工拼接 YAML。已有项目绑定保留，只有用户确认的字段才覆盖。
+   次数、通过条件和可选 `role_rotation`；不得手工拼接 YAML。已有项目绑定保留，只有用户确认的字段才覆盖。
 7. 运行项目校验与 `config-tool.mjs merge`，输出全局配置、项目工作流、角色映射、Superpowers
    状态及待办。只有三类角色已明确绑定、配置校验通过且安装门禁满足时才输出 `INIT_READY`；
    否则输出 `INIT_INCOMPLETE` 和阻塞项。除非用户明确指定立即运行，否则初始化到此结束。
@@ -154,6 +154,7 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 1. 项目可定义多个命名工作流和一个默认工作流；每个工作流至少包含：Leader、实施者、
    审核者角色绑定；设计、计划、实施、审查、返修和最终验收的步骤顺序；各步骤是否
    启用及所需 Skill；Reviewer 源码只读约束；最大返修次数与超限接管者；通过和拒绝的输出条件。
+   可选开启 `role_rotation`，允许实施者与审查者在阶段边界轮换；默认关闭。
 2. 写入必须使用结构化 update，精确调用：
    `node scripts/config-tool.mjs update --file "<repo>/.herdr/workflows.yaml" --scope project --set '{"workflows.<name>.<字段>":"<值>"}'`；
    写入后运行 `--scope project` 校验和合并命令确认有效配置。
@@ -208,7 +209,12 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 8. 实施者与审核者可通过 Herdr 点对点消息直接澄清证据、交接复核和反馈返修，不由 Leader
    转发正文；双方不得自行宣布流程结束，实质结论必须对 Leader 可审计，且不得取消 Leader
    最终裁决。用户可动态指定 Agent 分工。
-9. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
+9. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
+   `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
+   轮换前检查全局 Agent 的 `capabilityTier`。任一缺失、差距大于 1，或模型能力无法可靠比较时，
+   先向用户提示“两个 Agent 的模型能力不要差距过大”，得到确认后再切换；未确认则保持原角色。
+   `maxSwitches` 用于限制本轮轮换次数。轮换不改变 Reviewer 只读门禁。
+10. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
 
 ## 权限和安全边界
 
@@ -236,6 +242,7 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 - Agent 状态为 unknown、超时或阻塞：读取状态和最近输出后处理，不重复盲发提示。
 - review 模式出现评审单以外的工作树修改：保留现场并报告，不自动回滚用户或 Agent 变更。
 - Agent 点对点通信不可用或双向冒烟失败：停止工作流，不让 Leader 充当人工消息中继。
+- 角色轮换开启但能力等级缺失、差距大于 1 或用户未确认：保持原角色并报告未轮换原因。
 - 配置无效：指出字段路径和原因，不部分写入配置。
 
 ## 适配器与新增 Agent

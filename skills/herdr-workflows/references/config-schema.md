@@ -46,6 +46,7 @@ tarball 完整性摘要；下载 tarball 后校验 SHA-512 与 registry 一致�
 | `elevated_enabled` | boolean | 是否启用最大权限参数（默认 true） |
 | `model` | string\|null | 固定模型或 `null` 跟随默认 |
 | `model_args` | string[] | 模型参数 |
+| `capability_tier` | 1-5 整数\|null | 可选模型能力等级；用于角色轮换前的差距提示，不由插件替用户评测模型 |
 | `default_role` | string\|null | 默认角色资格回退：`leader`/`implementer`/`reviewer`/`null` |
 | `superpowers` | string\|null | `present`/`absent`/`unknown` |
 
@@ -65,6 +66,11 @@ tarball 完整性摘要；下载 tarball 后校验 SHA-512 与 registry 一致�
 | `steps` | object | 各步骤 `{enabled: boolean, skill?: string}` |
 | `max_rework` | 非负整数 | 最大返修次数（默认 5） |
 | `takeover_on_exceed` | string | 超限接管者（默认 `leader`） |
+| `role_rotation` | object | 是否允许实施者与审查者在阶段边界轮换 |
+| `role_rotation.enabled` | boolean | 默认 `false`；开启后仍由 Leader 决策，不自动切换 |
+| `role_rotation.interval_minutes` | 正整数 | 两次轮换评估的最短时间间隔（默认 120） |
+| `role_rotation.max_switches` | 非负整数 | 本轮工作流最多轮换次数（默认 2） |
+| `role_rotation.capability_gap_warning` | boolean | 模型能力等级缺失或差距过大时是否先提示用户（默认 `true`） |
 | `pass_condition` | string\|null | 通过条件说明 |
 | `fail_condition` | string\|null | 失败条件说明 |
 
@@ -110,6 +116,12 @@ tarball 完整性摘要；下载 tarball 后校验 SHA-512 与 registry 一致�
     "steps": {},
     "maxRework": 5,
     "takeoverOnExceed": "leader",
+    "roleRotation": {
+      "enabled": false,
+      "intervalMinutes": 120,
+      "maxSwitches": 2,
+      "capabilityGapWarning": true
+    },
     "passCondition": null,
     "failCondition": null
   },
@@ -132,6 +144,11 @@ tarball 完整性摘要；下载 tarball 后校验 SHA-512 与 registry 一致�
 `defaultWorkflow` 取运行时覆盖 > 项目 > 默认；运行时 `workflow`/`leader`/`implementer`/`reviewer`
 可覆盖选择与角色绑定；角色字段没有显式值时保持 `null`，不得从当前客户端或 Agent 排序推断；
 `agents` 只来自全局配置并保留启动参数。
+
+角色轮换只允许发生在当前 Agent 回合结束、评审单轮次完成或返修交接等阶段边界，不能中断正在执行的回合。
+Leader 比较实施者与审查者的 `capability_tier`；任一缺失、差距大于 1，或模型名称无法可靠比较时，
+必须先提示用户“两个 Agent 的模型能力不要差距过大”，等待确认后再轮换。轮换只改变后续任务的角色绑定，
+不覆盖全局 Agent 配置；审查者角色仍受 `reviewer_read_only` 约束。
 
 ## 错误输出
 
