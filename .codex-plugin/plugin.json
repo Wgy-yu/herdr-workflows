@@ -1,6 +1,6 @@
 {
   "name": "herdr-workflows",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "External Codex workflow plugin for configuring and running portable Herdr multi-agent workflows",
   "author": {
     "name": "wgy"
@@ -10,7 +10,7 @@
   "interface": {
     "displayName": "Herdr Workflows",
     "shortDescription": "Initialize and run Herdr multi-agent workflows",
-    "longDescription": "Use the external Herdr Workflows plugin to initialize Agent roles, Superpowers, and project workflows, then inspect, review, and execute multi-agent workflows with direct Agent communication.",
+    "longDescription": "Use the external Herdr Workflows plugin to initialize Agent roles, Superpowers, and project workflows, route Herdr completion events directly between roles, and execute multi-agent workflows without Leader polling.",
     "developerName": "wgy",
     "category": "Developer Tools",
     "capabilities": [

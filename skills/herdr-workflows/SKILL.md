@@ -56,6 +56,20 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
   远程 Shell。命令、目标和等待范围必须由用户任务授权，涉及安装、删除、覆盖、外部服务
   或秘密时仍按权限门禁处理。
 
+## Herdr 事件桥接（避免 Leader 轮询）
+
+- 插件根目录的 `herdr-plugin.toml` 是官方 Herdr 外置插件清单；它只注册
+  `pane.agent_status_changed` 事件，不修改官方 Herdr 代码。
+- 用户确认注册该插件后，Herdr 在 Agent 状态变为 `done` 或 `blocked` 时启动
+  `herdr-event-bridge.mjs`。桥接读取项目 `.herdr/workflows.yaml`，通过官方 Socket API
+  的 `agent.list` 找到配置角色，再用 `agent.prompt` 直接通知目标 Agent：实施者完成后直达
+  审查者，审查者完成后直达 Leader，任一角色阻塞时直达 Leader。
+- 通知正文只包含状态、角色、pane/workspace 和共享事件记录路径；长篇证据仍写入评审单。
+  事件会追加到 `<repo>/.herdr/workflow-events.jsonl`，带 Herdr 状态序号的重复事件不会重复
+  通知。目标 Agent 暂时不可用时，桥接退回官方 `notification.show`，不会让 Leader 充当中继。
+- 该桥接只处理已明确配置三类角色的项目；角色未配置、项目配置不存在或事件不是可路由状态时
+  安全跳过并留下 Herdr 插件日志，不伪造完成结论。
+
 ## 配置模型（mode=config / mode=workflow 及所有 mode 共用）
 
 两层配置 + 插件默认值，优先级从高到低：
@@ -131,6 +145,11 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 7. 运行项目校验与 `config-tool.mjs merge`，输出全局配置、项目工作流、角色映射、Superpowers
    状态及待办。只有三类角色已明确绑定、配置校验通过且安装门禁满足时才输出 `INIT_READY`；
    否则输出 `INIT_INCOMPLETE` 和阻塞项。除非用户明确指定立即运行，否则初始化到此结束。
+8. 若运行在 Herdr 环境且用户确认，检查并注册外置事件桥接：优先使用
+   `herdr plugin install Wgy-yu/herdr-workflows --yes`，本地开发使用
+   `herdr plugin link <插件根目录>`；注册后用 `herdr plugin list --plugin wgy.herdr-workflows-bridge`
+   确认无 manifest warning。用户拒绝或 Herdr 版本低于 `0.7.0` 时，不阻塞配置初始化，但必须
+   输出“事件直达未启用”，并说明 Leader 仍需按普通点对点通信推进。
 
 ## mode=config：配置本机 Agent 能力和默认分工
 
@@ -209,12 +228,15 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 8. 实施者与审核者可通过 Herdr 点对点消息直接澄清证据、交接复核和反馈返修，不由 Leader
    转发正文；双方不得自行宣布流程结束，实质结论必须对 Leader 可审计，且不得取消 Leader
    最终裁决。用户可动态指定 Agent 分工。
-9. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
+9. 事件桥接已注册时，Leader 不主动轮询实施者或审查者；以 Herdr 状态事件和共享事件记录为
+   触发事实。若事件桥接未启用，才按当前 Herdr 能力使用 `agent.wait`，不得用长时间终端轮询
+   模拟等待。桥接通知只负责唤醒下一角色，不替代 Leader 的最终裁决。
+10. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
    `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
    轮换前检查全局 Agent 的 `capabilityTier`。任一缺失、差距大于 1，或模型能力无法可靠比较时，
    先向用户提示“两个 Agent 的模型能力不要差距过大”，得到确认后再切换；未确认则保持原角色。
    `maxSwitches` 用于限制本轮轮换次数。轮换不改变 Reviewer 只读门禁。
-10. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
+11. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
 
 ## 权限和安全边界
 
