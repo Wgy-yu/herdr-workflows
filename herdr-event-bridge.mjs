@@ -205,6 +205,13 @@ function extractWorkspace(response) {
 }
 
 /** 对官方 Herdr 本地 NDJSON Socket API 发起单次请求。 */
+export function normalizeSocketPath(socketPath, platform = process.platform) {
+  if (!socketPath || platform !== "win32" || socketPath.startsWith("\\\\.\\pipe\\")) {
+    return socketPath;
+  }
+  return `\\\\.\\pipe\\${socketPath}`;
+}
+
 export function requestSocket(socketPath, method, params = {}, timeoutMs = 8000) {
   return new Promise((resolvePromise, rejectPromise) => {
     if (!socketPath) {
@@ -212,7 +219,7 @@ export function requestSocket(socketPath, method, params = {}, timeoutMs = 8000)
       return;
     }
     const id = `herdr-workflows-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const socket = createConnection({ path: socketPath });
+    const socket = createConnection({ path: normalizeSocketPath(socketPath) });
     let buffer = "";
     let settled = false;
     const finish = (error, value) => {

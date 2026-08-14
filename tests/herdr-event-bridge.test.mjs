@@ -12,6 +12,7 @@ import {
   buildNotification,
   eventKey,
   findAgentTarget,
+  normalizeSocketPath,
 } from "../herdr-event-bridge.mjs";
 import { readWorkflowState, startWorkflow } from "../workflow-state.mjs";
 
@@ -120,6 +121,18 @@ test("事件键优先使用 Herdr 状态序号，避免重复通知", () => {
     ),
     "run-1:w1:w1:p2:opencode:done:IMPLEMENTATION_RUNNING"
   );
+});
+
+test("Windows Herdr socket 标记路径归一化为命名管道地址", () => {
+  assert.equal(
+    normalizeSocketPath("C:\\Users\\wgy\\AppData\\Roaming\\herdr\\herdr.sock", "win32"),
+    "\\\\.\\pipe\\C:\\Users\\wgy\\AppData\\Roaming\\herdr\\herdr.sock"
+  );
+  assert.equal(
+    normalizeSocketPath("\\\\.\\pipe\\C:\\Users\\wgy\\AppData\\Roaming\\herdr\\herdr.sock", "win32"),
+    "\\\\.\\pipe\\C:\\Users\\wgy\\AppData\\Roaming\\herdr\\herdr.sock"
+  );
+  assert.equal(normalizeSocketPath("/tmp/herdr.sock", "linux"), "/tmp/herdr.sock");
 });
 
 test("按工作区和 Agent 名称找到目标 pane", () => {
