@@ -123,10 +123,14 @@ function saveWorkflowState(projectRoot, state) {
 export function readWorkflowState(projectRoot) {
   const file = stateFile(projectRoot);
   if (!existsSync(file)) {
-    return { version: 1, workflow: null, status: "READY", sequence: 0, eventKeys: [] };
+    return { version: 1, workflow: null, status: "READY", sequence: 0, eventKeys: [], observedWorking: [] };
   }
   const state = JSON.parse(readFileSync(file, "utf8"));
-  return { ...state, eventKeys: Array.isArray(state.eventKeys) ? state.eventKeys : [] };
+  return {
+    ...state,
+    eventKeys: Array.isArray(state.eventKeys) ? state.eventKeys : [],
+    observedWorking: Array.isArray(state.observedWorking) ? state.observedWorking : [],
+  };
 }
 
 export function startWorkflowUnlocked(projectRoot, workflow) {
@@ -141,6 +145,17 @@ export function startWorkflowUnlocked(projectRoot, workflow) {
     status: "IMPLEMENTATION_RUNNING",
     sequence: current.sequence + 1,
     eventKeys: [],
+    observedWorking: [],
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function observeWorkingUnlocked(projectRoot, observationKey) {
+  const current = readWorkflowState(projectRoot);
+  if (current.observedWorking.includes(observationKey)) return current;
+  return saveWorkflowState(projectRoot, {
+    ...current,
+    observedWorking: [...current.observedWorking, observationKey],
     updatedAt: new Date().toISOString(),
   });
 }

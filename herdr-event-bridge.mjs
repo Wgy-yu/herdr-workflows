@@ -9,10 +9,10 @@ import { dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { mergeConfig, parseYamlFile } from "./skills/herdr-workflows/scripts/config-tool.mjs";
-import { canTransitionWorkflow, nextWorkflowStatus, readWorkflowState, transitionWorkflowUnlocked, withWorkflowLock } from "./workflow-state.mjs";
+import { canTransitionWorkflow, nextWorkflowStatus, observeWorkingUnlocked, readWorkflowState, transitionWorkflowUnlocked, withWorkflowLock } from "./workflow-state.mjs";
 
 const DEFAULT_EVENT = "pane.agent_status_changed";
-const ROUTABLE_STATUSES = new Set(["done", "blocked"]);
+const ROUTABLE_STATUSES = new Set(["done", "idle", "blocked"]);
 
 function normalizeEventName(value) {
   if (value === "pane_agent_status_changed") return DEFAULT_EVENT;
@@ -105,14 +105,17 @@ function roleMatches(eventAgent, roleAgent) {
 }
 
 /** 根据状态事件决定下一位 Agent，返回 null 表示不需要转发。 */
-export function routeAgentEvent(event, workflow) {
+export function routeAgentEvent(event, workflow, options = {}) {
   if (!event || !workflow || !ROUTABLE_STATUSES.has(event.status)) {
     return null;
   }
-  if (roleMatches(event.agent, workflow.implementer) && event.status === "done") {
+  if (event.status === "idle" && options.observedWorking !== true) {
+    return null;
+  }
+  if (roleMatches(event.agent, workflow.implementer) && ["done", "idle"].includes(event.status)) {
     return { fromRole: "implementer", toRole: "reviewer", reason: "implementation_done" };
   }
-  if (roleMatches(event.agent, workflow.reviewer) && event.status === "done") {
+  if (roleMatches(event.agent, workflow.reviewer) && ["done", "idle"].includes(event.status)) {
     return { fromRole: "reviewer", toRole: "leader", reason: "review_done" };
   }
   if (event.status === "blocked" && roleMatches(event.agent, workflow.implementer)) {
@@ -343,6 +346,16 @@ function notificationTitle(route) {
   return "Herdr Agent 需要关注";
 }
 
+function observationKey(state, event) {
+  return `${state.runId}:${state.status}:${event.workspaceId}:${event.paneId}:${event.agent}`;
+}
+
+function runningRole(status) {
+  if (status === "IMPLEMENTATION_RUNNING") return "implementer";
+  if (status === "REVIEW_RUNNING") return "reviewer";
+  return null;
+}
+
 /** 处理一个事件钩子；返回结果便于测试和 plugin log 诊断。 */
 export async function handleEvent(options = {}) {
   const env = options.env ?? process.env;
@@ -393,7 +406,19 @@ export async function handleEvent(options = {}) {
     // pane.agent.list 的名称优先用于角色匹配。
     event.agent = sourceName ?? event.agent;
   }
-  const route = routeAgentEvent(event, workflow);
+  if (event.status === "working") {
+    return withWorkflowLock(projectRoot, async () => {
+      const workflowState = readWorkflowState(projectRoot);
+      const role = runningRole(workflowState.status);
+      if (!role || !roleMatches(event.agent, workflow[role])) {
+        return { handled: false, reason: "not-routable", event, workflowState };
+      }
+      observeWorkingUnlocked(projectRoot, observationKey(workflowState, event));
+      return { handled: false, reason: "working-observed", event, workflowStatus: workflowState.status };
+    });
+  }
+
+  const route = routeAgentEvent(event, workflow, { observedWorking: true });
   if (!route) {
     return { handled: false, reason: "not-routable", event };
   }
@@ -402,6 +427,9 @@ export async function handleEvent(options = {}) {
   return withWorkflowLock(projectRoot, async () => {
     const workflowState = readWorkflowState(projectRoot);
     const key = eventKey(event, workflowState.status, workflowState.runId);
+    if (event.status === "idle" && !workflowState.observedWorking.includes(observationKey(workflowState, event))) {
+      return { handled: false, reason: "idle-without-working", event, route, eventKey: key, workflowState };
+    }
     if (!canTransitionWorkflow(workflowState.status, route.reason)) {
       return { handled: false, reason: "workflow-state-not-routable", error: `非法工作流迁移：${workflowState.status} + ${route.reason}`, event, route, eventKey: key, workflowState };
     }

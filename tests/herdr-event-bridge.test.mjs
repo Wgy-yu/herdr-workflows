@@ -123,6 +123,26 @@ test("事件键优先使用 Herdr 状态序号，避免重复通知", () => {
   );
 });
 
+test("没有先观察到 working 时，idle 不得路由", () => {
+  const workflow = { leader: "codex-leader", implementer: "opencode", reviewer: "claude" };
+  assert.equal(
+    routeAgentEvent(
+      { agent: "opencode", status: "idle", paneId: "w1:p2", workspaceId: "w1" },
+      workflow,
+      { observedWorking: false }
+    ),
+    null
+  );
+  assert.deepEqual(
+    routeAgentEvent(
+      { agent: "opencode", status: "idle", paneId: "w1:p2", workspaceId: "w1" },
+      workflow,
+      { observedWorking: true }
+    ),
+    { fromRole: "implementer", toRole: "reviewer", reason: "implementation_done" }
+  );
+});
+
 test("Windows Herdr socket 标记路径归一化为命名管道地址", () => {
   assert.equal(
     normalizeSocketPath("C:\\Users\\wgy\\AppData\\Roaming\\herdr\\herdr.sock", "win32"),
@@ -262,6 +282,35 @@ test("未通过 dispatch 启动时 done 事件不能推进工作流", async () =
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("同一聚焦 pane 的 working 到 idle 会自动通知下一角色", async () => {
+  const fixture = bridgeFixture("herdr-workflows-idle-");
+  const calls = [];
+  try {
+    startWorkflow(fixture.project, "default");
+    const request = async (method, params) => {
+      calls.push({ method, params });
+      if (method === "agent.list") return { result: { agents: [
+        { name: "opencode", pane_id: "w1:p2", workspace_id: "w1" },
+        { name: "claude", pane_id: "w1:p3", workspace_id: "w1" },
+      ] } };
+      return { result: { ok: true } };
+    };
+    const working = await handleEvent({
+      env: { ...fixture.env, HERDR_PLUGIN_EVENT_JSON: JSON.stringify({ type: "pane_agent_status_changed", pane_id: "w1:p2", workspace_id: "w1", agent: "opencode", agent_status: "working" }) },
+      request,
+    });
+    assert.equal(working.reason, "working-observed");
+    assert.equal(readWorkflowState(fixture.project).status, "IMPLEMENTATION_RUNNING");
+    const idle = await handleEvent({
+      env: { ...fixture.env, HERDR_PLUGIN_EVENT_JSON: JSON.stringify({ type: "pane_agent_status_changed", pane_id: "w1:p2", workspace_id: "w1", agent: "opencode", agent_status: "idle" }) },
+      request,
+    });
+    assert.equal(idle.handled, true);
+    assert.equal(idle.workflowStatus, "REVIEW_RUNNING");
+    assert.equal(calls.some((call) => call.method === "agent.prompt" && call.params.target === "w1:p3"), true);
+  } finally { rmSync(fixture.root, { recursive: true, force: true }); }
 });
 
 test("agent.prompt 失败时不推进状态且相同事件可以重放", async () => {
