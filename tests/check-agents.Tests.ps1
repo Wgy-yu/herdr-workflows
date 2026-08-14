@@ -74,6 +74,9 @@ shimagent:
   kind: shimagent
   commands: [shimagent]
   elevated_args: []
+  superpowers:
+    detect_dirs: ["%HERDR_TEST_SUPERPOWERS_ROOT%"]
+    detect_pattern: null
 noversion:
   kind: noversion
   commands: [noversion]
@@ -91,6 +94,13 @@ noelevated:
   commands: [noelevated]
   elevated_args: [--max-permission]
 '@
+
+    $superpowersRoot = Join-Path $tempDir "codex-superpowers"
+    New-Item -ItemType Directory -Path $superpowersRoot | Out-Null
+    $previousSuperpowersRoot = $env:HERDR_TEST_SUPERPOWERS_ROOT
+    $previousSecret = $env:HERDR_TEST_SECRET
+    $env:HERDR_TEST_SUPERPOWERS_ROOT = $superpowersRoot
+    $env:HERDR_TEST_SECRET = "should-not-leak"
 
     $kinds = @("nativeagent", "shimagent", "noversion", "loudagent", "missingagent", "unknownagent", "noelevated")
     # stderr 单独落盘：探测子命令的 stdout+stderr 都必须被完整捕获，脚本 stderr 不得有泄漏。
@@ -123,6 +133,10 @@ noelevated:
     Assert-True ($shim.command_type -eq "ps1_shim") "PowerShell shim" "command_type 应为 ps1_shim，实际 $($shim.command_type)"
     Assert-True ($shim.launch_method -eq "pane_run") "PowerShell shim" "launch_method 应为 pane_run，实际 $($shim.launch_method)"
     Assert-True ($shim.diagnostics.version_probe -eq "ok") "PowerShell shim" "diagnostics.version_probe 应为 ok，实际 $($shim.diagnostics.version_probe)"
+    Assert-True ($shim.superpowers_status -eq "present") "当前环境 Superpowers" "应从当前环境变量指定的 Codex 路径检测到 Superpowers，实际 $($shim.superpowers_status)"
+    Assert-True ($shim.diagnostics.superpowers.selected_path -eq $superpowersRoot) "当前环境 Superpowers" "应记录环境变量解析后的命中路径，实际 $($shim.diagnostics.superpowers.selected_path)"
+    Assert-True ($shim.diagnostics.environment.variables.HERDR_TEST_SECRET -eq "<REDACTED>") "环境变量脱敏" "秘密变量必须脱敏"
+    Assert-True (@($shim.diagnostics.environment.path_roots) -contains $tempDir) "当前 PATH" "应记录本次检查使用的有效 PATH 根目录"
 
     $noVersion = $items | Where-Object { $_.kind -eq "noversion" }
     Assert-True ($null -ne $noVersion) "版本探测为空" "缺少 noversion 输出项"
@@ -156,5 +170,7 @@ noelevated:
     Write-Output "CHECK_AGENTS_TESTS_PASS"
 }
 finally {
+    if ($null -eq $previousSuperpowersRoot) { Remove-Item Env:HERDR_TEST_SUPERPOWERS_ROOT -ErrorAction SilentlyContinue } else { $env:HERDR_TEST_SUPERPOWERS_ROOT = $previousSuperpowersRoot }
+    if ($null -eq $previousSecret) { Remove-Item Env:HERDR_TEST_SECRET -ErrorAction SilentlyContinue } else { $env:HERDR_TEST_SECRET = $previousSecret }
     Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 }

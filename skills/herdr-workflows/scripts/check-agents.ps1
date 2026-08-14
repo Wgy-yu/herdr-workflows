@@ -14,6 +14,101 @@ param(
 
 $ErrorActionPreference = "Continue"
 
+$SensitiveEnvironmentPattern = '(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|COOKIE|AUTH|CREDENTIAL|PRIVATE)'
+$RelevantEnvironmentPattern = '(?i)^(CODEX(_.*)?|CLAUDE(_.*)?|OPENCODE(_.*)?|SUPERPOWER(_.*)?|HERDR(_.*)?|XDG_CONFIG_HOME|USERPROFILE|HOME|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH|PATH)$'
+
+function Get-PathRoots {
+    param([string]$PathValue)
+    if ([string]::IsNullOrEmpty($PathValue)) {
+        return @()
+    }
+    return @(
+        $PathValue -split [IO.Path]::PathSeparator |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrEmpty($_) } |
+            Select-Object -Unique
+    )
+}
+
+function Get-EnvironmentSnapshot {
+    $variables = [ordered]@{}
+    foreach ($entry in Get-ChildItem Env:) {
+        if ($entry.Name -match $RelevantEnvironmentPattern -or $entry.Name -match '(?i)^HERDR_TEST_') {
+            $variables[$entry.Name] = if ($entry.Name -match $SensitiveEnvironmentPattern) {
+                "<REDACTED>"
+            } else {
+                [string]$entry.Value
+            }
+        }
+    }
+    return [ordered]@{
+        variables = $variables
+        path_roots = @(Get-PathRoots $env:PATH)
+    }
+}
+
+function Expand-EnvironmentTemplate {
+    param([string]$Template)
+    if ([string]::IsNullOrEmpty($Template)) {
+        return $null
+    }
+    $expanded = [Environment]::ExpandEnvironmentVariables($Template)
+    return [regex]::Replace($expanded, '\$env:([A-Za-z_][A-Za-z0-9_]*)', {
+        param($match)
+        $value = [Environment]::GetEnvironmentVariable($match.Groups[1].Value)
+        if ($null -eq $value) { $match.Value } else { $value }
+    })
+}
+
+function Get-SuperpowersCandidates {
+    param(
+        $Superpowers,
+        [string]$Kind
+    )
+    $templates = @()
+    if ($null -ne $Superpowers) {
+        if ($Superpowers.PSObject.Properties.Name -contains "detect_dirs") {
+            $templates += @($Superpowers.detect_dirs | Where-Object { $_ })
+        }
+        if ($Superpowers.PSObject.Properties.Name -contains "detect_dir" -and $Superpowers.detect_dir) {
+            $templates += [string]$Superpowers.detect_dir
+        }
+    }
+    if ($env:HERDR_SUPERPOWERS_DIR) {
+        $templates = @($env:HERDR_SUPERPOWERS_DIR) + $templates
+    }
+    if ($Kind -eq "codex") {
+        $codexHome = [Environment]::GetEnvironmentVariable("CODEX_HOME")
+        if ([string]::IsNullOrEmpty($codexHome)) {
+            $codexHome = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE ".codex" } else { $null }
+        }
+        if ($codexHome) {
+            $templates += Join-Path $codexHome "plugins\cache\openai-curated-remote\superpowers"
+            $templates += Join-Path $codexHome "plugins\cache\superpowers-marketplace"
+            $templates += Join-Path $codexHome "skills\superpowers"
+        }
+        if ($env:USERPROFILE) {
+            $templates += Join-Path $env:USERPROFILE ".agents\skills\superpowers"
+        }
+    }
+    $seen = @{}
+    $candidates = @()
+    foreach ($template in $templates) {
+        $path = Expand-EnvironmentTemplate ([string]$template)
+        if ([string]::IsNullOrEmpty($path) -or $path -match '%[A-Za-z_][A-Za-z0-9_]*%') {
+            continue
+        }
+        $key = $path.ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $candidates += [ordered]@{ source = [string]$template; path = $path }
+        }
+    }
+    return @($candidates)
+}
+
+$environmentSnapshot = Get-EnvironmentSnapshot
+
 # 探测结果：value 为合并后的输出文本，probe 为机器可判定的 ok|empty|failed|skipped。
 # 子命令的 stdout 与 stderr 都重定向到临时文件，完整捕获且不向脚本 stdout/stderr 泄漏
 #（部分 CLI 如 opencode/yargs 把帮助写到 stderr，必须一并捕获）。
@@ -95,6 +190,7 @@ if ($null -eq $SupportedKinds -or $SupportedKinds.Count -eq 0) {
 if ($null -ne $CommandRoots -and $CommandRoots.Count -gt 0) {
     $env:PATH = (($CommandRoots -join ";") + ";" + $env:PATH)
 }
+$environmentSnapshot.path_roots = @(Get-PathRoots $env:PATH)
 
 $results = @()
 foreach ($kind in $SupportedKinds) {
@@ -109,7 +205,12 @@ foreach ($kind in $SupportedKinds) {
         elevated_args      = @()
         elevated_verified  = $false
         superpowers_status = "unknown"
-        diagnostics        = [ordered]@{ version_probe = "skipped"; help_probe = "skipped" }
+        diagnostics        = [ordered]@{
+            version_probe = "skipped"
+            help_probe = "skipped"
+            environment = $environmentSnapshot
+            superpowers = [ordered]@{ candidates = @(); selected_path = $null; source = "none" }
+        }
     }
 
     $adapter = $null
@@ -156,16 +257,32 @@ foreach ($kind in $SupportedKinds) {
     $item.version = $versionProbe.value
 
     $super = $adapter.superpowers
-    if ($null -ne $super -and -not [string]::IsNullOrEmpty([string]$super.detect_dir)) {
-        $dir = [Environment]::ExpandEnvironmentVariables([string]$super.detect_dir)
-        $check = $dir
-        if (-not [string]::IsNullOrEmpty([string]$super.detect_pattern)) {
-            $check = Join-Path $dir ([string]$super.detect_pattern)
+    $superCandidates = @(Get-SuperpowersCandidates $super $kind)
+    $item.diagnostics.superpowers.candidates = @($superCandidates)
+    if ($null -ne $super -and $superCandidates.Count -gt 0) {
+        $pattern = if ($super.PSObject.Properties.Name -contains "detect_pattern") {
+            [string]$super.detect_pattern
+        } else {
+            ""
         }
-        if (Test-Path -Path $check -ErrorAction SilentlyContinue) {
+        $selected = $null
+        foreach ($candidate in $superCandidates) {
+            $check = $candidate.path
+            if (-not [string]::IsNullOrEmpty($pattern) -and $pattern -ne "null") {
+                $check = Join-Path $candidate.path $pattern
+            }
+            if (Test-Path -Path $check -ErrorAction SilentlyContinue) {
+                $selected = $candidate
+                break
+            }
+        }
+        if ($null -ne $selected) {
             $item.superpowers_status = "present"
+            $item.diagnostics.superpowers.selected_path = $selected.path
+            $item.diagnostics.superpowers.source = $selected.source
         } else {
             $item.superpowers_status = "absent"
+            $item.diagnostics.superpowers.source = "environment-and-adapter-candidates"
         }
     }
 

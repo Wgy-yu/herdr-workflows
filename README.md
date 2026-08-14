@@ -192,6 +192,7 @@ workflows:
     reviewer: claude-reviewer
     reviewer_read_only: true
     use_superpowers: true
+    event_bridge_required: true
     role_rotation:
       enabled: false
       interval_minutes: 120
@@ -202,6 +203,10 @@ workflows:
 
 - `true`（默认）：执行工作流中声明的 `superpowers:*` Skill，并检查/安装对应 Agent 的 Superpowers。
 - `false`：跳过 Superpowers Skill、安装和门禁，但保留角色、审查只读和 Leader 最终裁决规则。
+
+检查 Superpowers 时，插件先读取当前终端环境变量和有效 `PATH`，再分析 `CODEX_HOME`、
+`CLAUDE_CONFIG_DIR`、`OPENCODE_CONFIG_DIR` 等 Agent 专属目录，最后才回退到默认用户目录。
+检查输出会记录候选路径和命中路径，但会脱敏密钥、Token、密码等变量值。
 
 ### `role_rotation`
 
@@ -216,6 +221,12 @@ role_rotation:
 
 轮换只发生在当前回合结束、评审轮次完成或返修交接等阶段边界。每次轮换前会提示：
 “两个 Agent 的模型能力不要差距过大”，等待用户确认后才切换；插件不会配置或评测能力等级。
+
+### `event_bridge_required`
+
+该字段固定为 `true`，不能关闭。`$herdr-workflows:do` 启动前必须确认
+`wgy.herdr-workflows-bridge` 已注册；否则输出 `EVENT_BRIDGE_REQUIRED` 并停止，不会退回
+`agent.wait`、`agent.prompt --wait` 或终端轮询。
 
 ## 事件桥接行为
 

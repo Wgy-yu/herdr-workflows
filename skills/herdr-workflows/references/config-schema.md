@@ -63,6 +63,7 @@ tarball 完整性摘要；下载 tarball 后校验 SHA-512 与 registry 一致�
 | `reviewer` | string\|null | 审核 Agent 标识；默认值为 null，必须由 init 或运行时参数明确选择 |
 | `reviewer_read_only` | boolean | Reviewer 对业务源码的只读约束（默认 true）；不禁止 review 模式追加本轮共享 Markdown 评审单 |
 | `use_superpowers` | boolean | 是否在该工作流执行 Superpowers Skill 与安装门禁（默认 `true`） |
+| `event_bridge_required` | boolean | 事件驱动硬门禁；必须为 `true`，禁止关闭后退回 `agent.wait` 或轮询 |
 | `steps` | object | 各步骤 `{enabled: boolean, skill?: string}` |
 | `max_rework` | 非负整数 | 最大返修次数（默认 5） |
 | `takeover_on_exceed` | string | 超限接管者（默认 `leader`） |

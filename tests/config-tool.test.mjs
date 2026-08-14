@@ -54,6 +54,21 @@ test("插件默认工作流不预设 Codex 或其他 Agent 为 Leader", () => {
   assert.equal(workflow.role_rotation.enabled, false);
   assert.equal(workflow.role_rotation.interval_minutes, 120);
   assert.equal(workflow.use_superpowers, true);
+  assert.equal(workflow.event_bridge_required, true);
+});
+
+test("事件桥是工作流硬门禁且不允许关闭", () => {
+  const invalid = {
+    workflows: {
+      default: {
+        event_bridge_required: false,
+      },
+    },
+  };
+  assert.match(
+    validateProjectConfig(invalid).join("\n"),
+    /event_bridge_required.*必须为 true/
+  );
 });
 
 test("init 入口声明配置、Superpowers 与 Agent 直连能力", () => {
@@ -68,6 +83,14 @@ test("init 入口声明配置、Superpowers 与 Agent 直连能力", () => {
   assert.match(workflowsSkill, /模型能力不要差距过大/);
   assert.match(workflowsSkill, /use_superpowers/);
   assert.match(workflowsSkill, /至少三个不同 Agent/);
+});
+
+test("do 工作流只允许事件驱动下发", () => {
+  const workflowsSkill = readFileSync(workflowsSkillFile, "utf8");
+  assert.match(workflowsSkill, /EVENT_BRIDGE_REQUIRED/);
+  assert.match(workflowsSkill, /禁止使用[\s\S]{0,80}agent\.wait/);
+  assert.match(workflowsSkill, /禁止使用[\s\S]{0,80}--wait/);
+  assert.doesNotMatch(workflowsSkill, /若事件桥接未启用，才按当前 Herdr 能力使用 `agent\.wait`/);
 });
 
 test("角色轮换配置合并并可关闭 Superpowers", () => {

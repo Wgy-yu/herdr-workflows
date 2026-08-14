@@ -199,6 +199,11 @@ export function validateProjectConfig(value) {
         ) {
           errors.push(`${base}.use_superpowers 必须是布尔值`);
         }
+        if (workflow.event_bridge_required !== undefined && workflow.event_bridge_required !== null) {
+          if (workflow.event_bridge_required !== true) {
+            errors.push(`${base}.event_bridge_required 必须为 true；事件驱动是强制门禁`);
+          }
+        }
         if (
           workflow.max_rework !== undefined &&
           workflow.max_rework !== null &&
@@ -427,6 +432,7 @@ function normalizeWorkflow(name, workflow, runtime) {
     reviewer: runtime.reviewer ?? workflow.reviewer ?? null,
     reviewerReadOnly: workflow.reviewer_read_only ?? true,
     useSuperpowers: workflow.use_superpowers ?? true,
+    eventBridgeRequired: workflow.event_bridge_required ?? true,
     steps,
     maxRework: workflow.max_rework ?? 5,
     takeoverOnExceed: workflow.takeover_on_exceed ?? "leader",

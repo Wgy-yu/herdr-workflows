@@ -22,6 +22,9 @@ claude:
   windows_shim: pane_run
   superpowers:
     detect_dir: "%USERPROFILE%\\.claude\\plugins\\cache\\superpowers-marketplace"
+    detect_dirs:
+      - "%CLAUDE_CONFIG_DIR%\\plugins\\cache\\superpowers-marketplace"
+      - "%USERPROFILE%\\.agents\\skills\\superpowers"
     detect_pattern: null
     source: "https://github.com/obra/superpowers"
     install: "/plugin install superpowers@superpowers-marketplace"
@@ -38,6 +41,9 @@ opencode:
   windows_shim: pane_run
   superpowers:
     detect_dir: "%USERPROFILE%\\.config\\opencode\\skills"
+    detect_dirs:
+      - "%OPENCODE_CONFIG_DIR%\\skills"
+      - "%XDG_CONFIG_HOME%\\opencode\\skills"
     detect_pattern: "superpowers-*"
     source: "https://github.com/obra/superpowers"
     install: null
@@ -54,6 +60,12 @@ codex:
   windows_shim: agent_start
   superpowers:
     detect_dir: "%USERPROFILE%\\.codex\\plugins\\cache\\superpowers-marketplace"
+    detect_dirs:
+      - "%CODEX_HOME%\\plugins\\cache\\openai-curated-remote\\superpowers"
+      - "%CODEX_HOME%\\plugins\\cache\\superpowers-marketplace"
+      - "%CODEX_HOME%\\skills\\superpowers"
+      - "%USERPROFILE%\\.codex\\plugins\\cache\\openai-curated-remote\\superpowers"
+      - "%USERPROFILE%\\.agents\\skills\\superpowers"
     detect_pattern: null
     source: "https://github.com/obra/superpowers"
     install: null

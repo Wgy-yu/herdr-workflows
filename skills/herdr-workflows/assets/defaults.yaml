@@ -11,6 +11,8 @@ workflows:
     reviewer_read_only: true
     # 是否在该工作流中执行 Superpowers Skill 与安装门禁。
     use_superpowers: true
+    # 事件桥是 review/do 的强制完成通知通道，不允许关闭后退回等待或轮询。
+    event_bridge_required: true
     # 最大返修 5 次，超过上限由 Leader 接管。
     max_rework: 5
     takeover_on_exceed: leader

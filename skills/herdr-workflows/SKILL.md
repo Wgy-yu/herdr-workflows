@@ -26,8 +26,9 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
 - 需要控制 Herdr（窗格、标签页、Agent）时，必须先确认当前会话处于 Herdr 环境
   （`HERDR_ENV=1`）。不在 Herdr 环境中：停止控制操作，指导用户从 Herdr 管理窗格启动
   Leader，不伪造门禁通过。
-- Herdr 能力以 `herdr --skill` 输出为事实源。窗格、消息、等待和 Agent 检测复用 Herdr
-  已提供的能力，不自行实现，不凭记忆假设子命令与参数。
+- Herdr 能力以 `herdr --skill` 输出为事实源。窗格、消息和 Agent 检测复用 Herdr
+  已提供的能力，不自行实现，不凭记忆假设子命令与参数。`mode=do` 的完成推进只能由
+  外置事件桥触发，不得把等待 API 当作流程控制器。
 
 ## 公共工作流初始化（mode=review / mode=do 共用）
 
@@ -47,8 +48,9 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
 
 ## Agent 直连与命令调用
 
-- Agent 间高层通信使用 Herdr 的 `agent.prompt`，可指定目标并等待回执；输出读取使用
-  `agent.read`。这些调用由发送者直接发给目标 Agent，Leader 不代为转述。
+- Agent 间高层通信使用 Herdr 的 `agent.prompt`，只负责无等待地下发消息；禁止使用
+  `--wait`、`agent.wait` 或等待回执来推进 `mode=do`。输出读取使用 `agent.read`，仅可
+  在用户要求诊断时单次读取。Leader 不代为转述。
 - 如用户明确授权目标 Agent 在自己的终端执行命令，可使用 `agent.send_keys` 或
   `pane.send_text` 将命令输入目标窗格，再用 `agent.read`/`pane.read` 获取结果；先用
   `herdr --skill` 或 `herdr api schema --json` 确认当前参数，不猜测 CLI 参数。
@@ -56,11 +58,14 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
   远程 Shell。命令、目标和等待范围必须由用户任务授权，涉及安装、删除、覆盖、外部服务
   或秘密时仍按权限门禁处理。
 
-## Herdr 事件桥接（避免 Leader 轮询）
+## Herdr 事件桥接（mode=do 强制门禁）
 
 - 插件根目录的 `herdr-plugin.toml` 是官方 Herdr 外置插件清单；它只注册
   `pane.agent_status_changed` 事件，不修改官方 Herdr 代码。
-- 用户确认注册该插件后，Herdr 在 Agent 状态变为 `done` 或 `blocked` 时启动
+- `mode=do` 启动前必须确认该插件已注册；用
+  `herdr plugin list --plugin wgy.herdr-workflows-bridge` 检查，缺失、manifest warning
+  或版本不满足时立即停止并输出 `EVENT_BRIDGE_REQUIRED`，不得进入实施。
+- 注册后，Herdr 在 Agent 状态变为 `done` 或 `blocked` 时启动
   `herdr-event-bridge.mjs`。桥接读取项目 `.herdr/workflows.yaml`，通过官方 Socket API
   的 `agent.list` 找到配置角色，再用 `agent.prompt` 直接通知目标 Agent：实施者完成后直达
   审查者，审查者完成后直达 Leader，任一角色阻塞时直达 Leader。
@@ -68,7 +73,8 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
   事件会追加到 `<repo>/.herdr/workflow-events.jsonl`，带 Herdr 状态序号的重复事件不会重复
   通知。目标 Agent 暂时不可用时，桥接退回官方 `notification.show`，不会让 Leader 充当中继。
 - 该桥接只处理已明确配置三类角色的项目；角色未配置、项目配置不存在或事件不是可路由状态时
-  安全跳过并留下 Herdr 插件日志，不伪造完成结论。
+  安全跳过并留下 Herdr 插件日志，不伪造完成结论。桥接不是建议项，而是 `mode=do` 的
+  完成推进唯一来源。
 
 ## 配置模型（mode=config / mode=workflow 及所有 mode 共用）
 
@@ -103,8 +109,10 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
 2. 运行 `scripts/check-agents.ps1`：它从当前 `herdr agent start --help` 发现全部 Agent
    kind，对每个 kind 输出结构化 JSON（`kind`、`command`、`command_type`、`version`、
    `status`、`launch_method`、`adapter_status`、`elevated_args`、`elevated_verified`、
-   `superpowers_status`）。脚本只运行 `Get-Command`、`--version`、`--help` 和目录
-   存在性检查，不启动 Agent、不安装软件。
+   `superpowers_status`）。分析 Superpowers 前先捕获当前终端环境变量和有效 `PATH` 根目录，
+   再按环境变量、适配器候选和默认目录顺序解析；`diagnostics.environment` 中的秘密值必须
+   脱敏，`diagnostics.superpowers` 记录候选与最终命中路径。脚本只运行 `Get-Command`、
+   `--version`、`--help` 和目录存在性检查，不启动 Agent、不安装软件。
 3. 解读状态：`available`（可用）、`available_with_warnings`（命令存在但版本探测为空或
    失败，启动前需人工确认；`diagnostics.version_probe`/`diagnostics.help_probe` 以
    ok|empty|failed|skipped 机器判定，不使用 launch_error——check 不启动 Agent）、
@@ -134,22 +142,23 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
    不按当前客户端、Agent 排序或插件默认值推断 Leader。允许同一 Agent 承担多个角色，但
    必须把该决定写入项目配置并在摘要中提示。
 4. 仅当用户确认 `use_superpowers=true` 时，对用户选中的每个 Agent 处理 Superpowers：按适配器启动并确认目标 Agent 已就绪；已存在则记录；缺失且适配器有非空、已验证的
-   `install` 时，逐个展示来源与命令，取得该 Agent 的单独确认后，通过 `agent.prompt` 直接
-   发送安装指令并等待回执，再重新检查；`install: null` 时只展示官方说明并标记为待用户手动
+   `install` 时，逐个展示来源与命令，取得该 Agent 的单独确认后，通过无等待的 `agent.prompt`
+   发送安装指令并记录已下发；后续由用户再次运行 `check` 或由事件通知确认结果；`install: null` 时只展示官方说明并标记为待用户手动
    完成，禁止自行拼接安装命令或宣称已安装。
 5. 使用 `scripts/config-tool.mjs update` 写入全局 Agent 配置（只写明确字段、保留未知字段）
    并校验；不得把 API Key、Token、密码或其他秘密写入配置。
 6. 使用同一个结构化 `update` 工具创建或更新项目 `<repo>/.herdr/workflows.yaml`：设置
-   `default_workflow`、所选工作流的 `leader`/`implementer`/`reviewer`、`use_superpowers`、审查只读约束、返修
+   `default_workflow`、所选工作流的 `leader`/`implementer`/`reviewer`、`use_superpowers`、`event_bridge_required: true`、审查只读约束、返修
    次数、通过条件和可选 `role_rotation`；不得手工拼接 YAML。已有项目绑定保留，只有用户确认的字段才覆盖。
 7. 运行项目校验与 `config-tool.mjs merge`，输出全局配置、项目工作流、角色映射、Superpowers
    状态及待办。只有三类角色已明确绑定、配置校验通过且（`use_superpowers=true` 时）安装门禁满足时才输出 `INIT_READY`；
    否则输出 `INIT_INCOMPLETE` 和阻塞项。除非用户明确指定立即运行，否则初始化到此结束。
-8. 若运行在 Herdr 环境且用户确认，检查并注册外置事件桥接：优先使用
+8. 若运行在 Herdr 环境，检查并注册外置事件桥接：优先使用
    `herdr plugin install Wgy-yu/herdr-workflows --yes`，本地开发使用
    `herdr plugin link <插件根目录>`；注册后用 `herdr plugin list --plugin wgy.herdr-workflows-bridge`
-   确认无 manifest warning。用户拒绝或 Herdr 版本低于 `0.7.0` 时，不阻塞配置初始化，但必须
-   输出“事件直达未启用”，并说明 Leader 仍需按普通点对点通信推进。
+   确认无 manifest warning。用户拒绝或 Herdr 版本低于 `0.7.0` 时，配置可以保存但必须输出
+   `INIT_INCOMPLETE EVENT_BRIDGE_REQUIRED`；若用户要求立即进入 `mode=do`，必须停止，不能
+   退回普通点对点等待。
 
 ## mode=config：配置本机 Agent 能力和默认分工
 
@@ -218,9 +227,12 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 输入：入口运行时参数可指定工作流名或角色覆盖。写入授权：只有实施者修改代码，
 范围限定在任务目标内；审核者始终只读；只有 Leader 可宣布最终通过。
 
-1. 解析工作流并完成与 mode=review 相同的 Herdr 初始化和通信验收。
+1. 解析工作流并完成与 mode=review 相同的 Herdr 初始化和通信验收；随后检查
+   `event_bridge_required=true` 与 `wgy.herdr-workflows-bridge` 注册状态。任一条件不满足，
+   立即输出 `EVENT_BRIDGE_REQUIRED` 并停止，不创建实施任务。
 2. 按工作流执行设计与用户确认门禁（用户未确认不得进入实施）。
-3. 生成可执行计划并完成实施者的计划读取回执（逐字符核对）。
+3. 生成可执行计划，使用无等待 `agent.prompt` 下发给实施者并记录 `HANDOFF_DISPATCHED`；
+   不等待计划读取回执，不调用 `--wait` 或 `agent.wait`。
 4. 实施者修改代码并提供 diff 与验证证据。
 5. 审核者只读复核；当 `workflow.useSuperpowers=true` 时，Leader 使用
    `superpowers:receiving-code-review` 验证审查意见，不盲从审核结论；关闭时跳过该 Skill，
@@ -231,9 +243,10 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 8. 实施者与审核者可通过 Herdr 点对点消息直接澄清证据、交接复核和反馈返修，不由 Leader
    转发正文；双方不得自行宣布流程结束，实质结论必须对 Leader 可审计，且不得取消 Leader
    最终裁决。用户可动态指定 Agent 分工。
-9. 事件桥接已注册时，Leader 不主动轮询实施者或审查者；以 Herdr 状态事件和共享事件记录为
-   触发事实。若事件桥接未启用，才按当前 Herdr 能力使用 `agent.wait`，不得用长时间终端轮询
-   模拟等待。桥接通知只负责唤醒下一角色，不替代 Leader 的最终裁决。
+9. 事件桥接是强制完成推进通道：Leader 不主动轮询实施者或审查者，不调用 `agent.wait`，
+   不使用 `agent.prompt --wait`，不循环读取终端。任务下发后只记录 `HANDOFF_DISPATCHED`
+   并结束当前动作；以 `pane.agent_status_changed` 状态事件和共享事件记录为唯一触发事实。
+   桥接通知只负责唤醒下一角色，不替代 Leader 的最终裁决。
 10. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
        `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
        配置校验已保证至少三个不同 Agent；每次切换前先向用户提示“两个 Agent 的模型能力不要差距过大”，
@@ -266,6 +279,8 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
   `use_superpowers=false` 时跳过 Superpowers 安装和 Skill 门禁。
 - init 自动安装：仅执行适配器中已验证且非空的 `superpowers.install`，其余 Agent 只提供官方手动说明。
 - Agent 状态为 unknown、超时或阻塞：读取状态和最近输出后处理，不重复盲发提示。
+- `mode=do` 未注册事件桥或 `event_bridge_required` 不是 `true`：输出 `EVENT_BRIDGE_REQUIRED`
+  并停止，不得改用 `agent.wait`、`agent.prompt --wait` 或终端轮询。
 - review 模式出现评审单以外的工作树修改：保留现场并报告，不自动回滚用户或 Agent 变更。
 - Agent 点对点通信不可用或双向冒烟失败：停止工作流，不让 Leader 充当人工消息中继。
 - 角色轮换开启但不足三个不同 Agent 或用户未确认能力差距提示：保持原角色并报告未轮换原因。
