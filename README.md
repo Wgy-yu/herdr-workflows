@@ -45,6 +45,117 @@ herdr plugin link <本地 herdr-workflows 目录>
 herdr plugin list --plugin wgy.herdr-workflows-bridge
 ```
 
+## 安装 Claude、OpenCode 并接入 Herdr
+
+`herdr-workflows` 不会替用户安装第三方 Agent；先按 Agent 官方方式安装，再让 Herdr
+安装对应的集成。安装完成后，使用 `herdr agent start` 时的 `--kind` 必须使用下面的
+官方 kind 名称。
+
+### Claude Code
+
+Windows PowerShell：
+
+```powershell
+irm https://claude.ai/install.ps1 | iex
+```
+
+macOS、Linux 或 WSL：
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+也可以使用 Windows WinGet（`winget install Anthropic.ClaudeCode`）或 macOS Homebrew
+（`brew install --cask claude-code`）。安装后验证并登录：
+
+```text
+claude --version
+claude
+/login
+```
+
+在 Herdr 中安装生命周期集成，并在空闲 shell 窗格启动：
+
+```powershell
+herdr integration install claude
+herdr agent start claude-implementer --kind claude --pane <pane-id>
+```
+
+### OpenCode
+
+macOS、Linux、WSL 或其他 Unix shell 的官方快速安装：
+
+```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+Windows 推荐使用 WSL；也可以直接使用 Chocolatey、Scoop 或 npm：
+
+```powershell
+choco install opencode
+scoop install opencode
+npm install -g opencode-ai
+```
+
+macOS/Linux 还可以使用最新 Homebrew tap：
+
+```bash
+brew install anomalyco/tap/opencode
+```
+
+安装后验证并在 TUI 中执行 `/connect` 配置模型提供商：
+
+```text
+opencode --version
+opencode
+/connect
+```
+
+在 Herdr 中安装 OpenCode 集成并启动：
+
+```powershell
+herdr integration install opencode
+herdr agent start opencode-reviewer --kind opencode --pane <pane-id>
+```
+
+`<pane-id>` 必须是当前处于交互式 shell 提示符的空闲窗格。Agent 名称需唯一，且只能由
+小写字母、数字、`_` 和 `-` 组成；也可以直接在窗格中手动运行 `claude` 或 `opencode`，
+再用 `herdr agent rename <pane-id> <name>` 设置稳定名称。
+
+## Herdr 官方支持的 Agent
+
+以 Herdr 官方 `agent start --kind` 文档为准，目前共有 **21 个官方 kind**：
+
+```text
+pi, claude, codex, gemini, cursor, devin, agy, cline, omp, mastracode,
+opencode, copilot, kimi, kiro, droid, amp, grok, hermes, kilo, qodercli, maki
+```
+
+其中 `agy` 对应 Agents 文档中的 Antigravity CLI。官方 Agents 页面将前 19 个列为主支持
+列表，并注明 Gemini CLI、Cline 已能检测但测试较少；未安装专用集成的 Agent 仍可作为
+普通终端进程运行，只是状态信息可能只有屏幕检测，不能获得完整生命周期状态。
+
+Herdr 的官方直接集成目前提供以下 16 个安装项（集成数量不等于支持的 Agent 总数）：
+
+```text
+pi, omp, claude, codex, copilot, devin, droid, kimi,
+opencode, kilo, hermes, qodercli, cursor, mastracode,
+antigravity-cli, grok
+```
+
+按需执行，例如：
+
+```powershell
+herdr integration install claude
+herdr integration install opencode
+herdr integration status
+herdr agent list
+```
+
+完整状态权威、集成角色和 kind 说明请以 [Herdr Agents 文档](https://herdr.dev/docs/agents/)、
+[Agent automation 文档](https://herdr.dev/docs/agent-automation/) 和
+[Integrations 文档](https://herdr.dev/docs/integrations/) 为准。
+
 ## 命令
 
 在 Codex 中使用以下入口：
