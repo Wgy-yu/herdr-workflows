@@ -230,13 +230,35 @@ role_rotation:
 
 ## 事件桥接行为
 
+`mode=do` 不再由 Leader 直接调用 `agent.prompt`。Leader 先把已确认计划写入
+`<repo>/.herdr/workflow-plan.md`，然后调用插件的一次性 Action：
+
+```powershell
+herdr plugin action invoke wgy.herdr-workflows-bridge.dispatch
+```
+
+Action 只执行 `agent.list` 和不带等待参数的 `agent.prompt`，下发成功后立即退出。当前阶段
+原子写入 `<repo>/.herdr/workflow-state.json`，后续只有官方 Herdr 状态事件可以迁移阶段：
+
+1. `READY` → dispatch → `IMPLEMENTATION_RUNNING`。
+2. 实施者 `done` → `REVIEW_RUNNING`，直接通知审查者。
+3. 审查者 `done` → `FINAL_DECISION_PENDING`，直接通知 Leader 裁决。
+4. 实施者或审查者 `blocked` → `BLOCKED`，直接通知 Leader。
+
+处于错误阶段的完成事件会返回 `workflow-state-not-routable`，不能靠终端读取、自报文本或
+手工转发推进工作流。Leader 裁决为返修时，更新共享计划并再次调用 dispatch 即可开始下一轮。
+
+桥接同时兼容清单订阅名 `pane.agent_status_changed` 和 Herdr 0.8 真实载荷类型
+`pane_agent_status_changed`。事件追加到 `<repo>/.herdr/workflow-events.jsonl`；有状态序号时按
+序号去重，无状态序号时按工作区、pane、Agent、状态和当前阶段去重。
+
 桥接启用后：
 
 1. 实施者进入 `done`：直接通知审查者读取共享评审单并开始审查。
 2. 审查者进入 `done`：直接通知 Leader 读取评审单并进行最终裁决。
 3. 实施者或审查者进入 `blocked`：直接通知 Leader 处理阻塞。
 4. 目标 Agent 不可用：退回 Herdr `notification.show`，不让 Leader 充当消息中继。
-5. 事件追加到 `<repo>/.herdr/workflow-events.jsonl`，带状态序号的重复事件不会重复通知。
+5. 事件状态不匹配或重复时拒绝迁移，不通知下一角色。
 
 查看桥接日志：
 

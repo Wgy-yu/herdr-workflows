@@ -9,9 +9,15 @@ import { dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { mergeConfig, parseYamlFile } from "./skills/herdr-workflows/scripts/config-tool.mjs";
+import { readWorkflowState, transitionWorkflow } from "./workflow-state.mjs";
 
 const DEFAULT_EVENT = "pane.agent_status_changed";
 const ROUTABLE_STATUSES = new Set(["done", "blocked"]);
+
+function normalizeEventName(value) {
+  if (value === "pane_agent_status_changed") return DEFAULT_EVENT;
+  return value;
+}
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -55,7 +61,9 @@ export function parseEvent(raw, fallbackEventName = DEFAULT_EVENT) {
   const agent = isObject(value.agent) ? value.agent : {};
   const workspace = isObject(value.workspace) ? value.workspace : {};
   return {
-    eventName: firstString(value.event_name, value.eventName, value.type, fallbackEventName),
+    eventName: normalizeEventName(
+      firstString(value.event_name, value.eventName, value.type, fallbackEventName)
+    ),
     paneId: firstString(value.pane_id, value.paneId, pane.pane_id, pane.paneId),
     workspaceId: firstString(
       value.workspace_id,
@@ -139,14 +147,15 @@ export function buildNotification({ fromRole, toRole, reason, event, ledgerPath 
 }
 
 /** 只对带有 Herdr 状态序号的事件去重，避免吞掉没有序号的合法后续事件。 */
-export function eventKey(event) {
-  if (event?.revision === null || event?.revision === undefined) {
-    return null;
-  }
+export function eventKey(event, workflowStatus = null) {
   if (!event.workspaceId || !event.paneId || !event.status) {
     return null;
   }
-  return `${event.workspaceId}:${event.paneId}:${event.status}:${event.revision}`;
+  if (event?.revision !== null && event?.revision !== undefined) {
+    return `${event.workspaceId}:${event.paneId}:${event.status}:${event.revision}`;
+  }
+  if (!event.agent || !workflowStatus) return null;
+  return `${event.workspaceId}:${event.paneId}:${event.agent}:${event.status}:${workflowStatus}`;
 }
 
 function recordFields(record) {
@@ -386,9 +395,25 @@ export async function handleEvent(options = {}) {
   }
 
   const ledgerPath = join(projectRoot, ".herdr", "workflow-events.jsonl");
-  const key = eventKey(event);
+  const workflowState = readWorkflowState(projectRoot);
+  const key = eventKey(event, workflowState.status);
   if (hasDeliveredEvent(ledgerPath, key)) {
     return { handled: false, reason: "duplicate-event", event, route, eventKey: key };
+  }
+
+  let nextWorkflowState;
+  try {
+    nextWorkflowState = transitionWorkflow(projectRoot, route.reason, key);
+  } catch (error) {
+    return {
+      handled: false,
+      reason: "workflow-state-not-routable",
+      error: error.message,
+      event,
+      route,
+      eventKey: key,
+      workflowState,
+    };
   }
 
   const targetAgent = workflow[route.toRole];
@@ -429,8 +454,18 @@ export async function handleEvent(options = {}) {
     target,
     delivery,
     delivered,
+    workflowStatus: nextWorkflowState.status,
   });
-  return { handled: true, event, route, target, delivery, delivered, ledgerPath };
+  return {
+    handled: true,
+    event,
+    route,
+    target,
+    delivery,
+    delivered,
+    ledgerPath,
+    workflowStatus: nextWorkflowState.status,
+  };
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

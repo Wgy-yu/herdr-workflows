@@ -231,8 +231,9 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
    `event_bridge_required=true` 与 `wgy.herdr-workflows-bridge` 注册状态。任一条件不满足，
    立即输出 `EVENT_BRIDGE_REQUIRED` 并停止，不创建实施任务。
 2. 按工作流执行设计与用户确认门禁（用户未确认不得进入实施）。
-3. 生成可执行计划，使用无等待 `agent.prompt` 下发给实施者并记录 `HANDOFF_DISPATCHED`；
-   不等待计划读取回执，不调用 `--wait` 或 `agent.wait`。
+3. 生成可执行计划并写入 `<repo>/.herdr/workflow-plan.md`，随后只调用
+   `herdr plugin action invoke wgy.herdr-workflows-bridge.dispatch`。不得由 Leader 直接调用
+   `agent.prompt` 下发实施任务；Action 负责无等待下发、写入 `IMPLEMENTATION_RUNNING` 后立即退出。
 4. 实施者修改代码并提供 diff 与验证证据。
 5. 审核者只读复核；当 `workflow.useSuperpowers=true` 时，Leader 使用
    `superpowers:receiving-code-review` 验证审查意见，不盲从审核结论；关闭时跳过该 Skill，
@@ -243,10 +244,11 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 8. 实施者与审核者可通过 Herdr 点对点消息直接澄清证据、交接复核和反馈返修，不由 Leader
    转发正文；双方不得自行宣布流程结束，实质结论必须对 Leader 可审计，且不得取消 Leader
    最终裁决。用户可动态指定 Agent 分工。
-9. 事件桥接是强制完成推进通道：Leader 不主动轮询实施者或审查者，不调用 `agent.wait`，
-   不使用 `agent.prompt --wait`，不循环读取终端。任务下发后只记录 `HANDOFF_DISPATCHED`
-   并结束当前动作；以 `pane.agent_status_changed` 状态事件和共享事件记录为唯一触发事实。
-   桥接通知只负责唤醒下一角色，不替代 Leader 的最终裁决。
+9. 插件状态机是强制完成推进通道：dispatch 后 Leader 结束当前动作；只有 Herdr 官方
+   `pane.agent_status_changed` 事件能把 `.herdr/workflow-state.json` 从
+   `IMPLEMENTATION_RUNNING` 推进到 `REVIEW_RUNNING`，再推进到 `FINAL_DECISION_PENDING`。
+   错误阶段、重复事件、终端读取和 Agent 自报文本都不能推进状态。桥接通知只负责唤醒
+   下一角色，不替代 Leader 的最终裁决。
 10. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
        `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
        配置校验已保证至少三个不同 Agent；每次切换前先向用户提示“两个 Agent 的模型能力不要差距过大”，
