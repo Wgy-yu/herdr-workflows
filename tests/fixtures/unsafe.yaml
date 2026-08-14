@@ -1,0 +1,14 @@
+# 不安全示例：同时包含敏感字段和绝对命令路径，必须被项目配置校验拒绝。
+default_workflow: claude-implement-opencode-review
+workflows:
+  claude-implement-opencode-review:
+    leader: codex
+    implementer: claude
+    reviewer: opencode
+api_key: "[REDACTED_SECRET]"
+secret: "[REDACTED_SECRET]"
+token: "[REDACTED_SECRET]"
+password: "[REDACTED_SECRET]"
+commands:
+  - C:\Program Files\claude\claude.exe
+  - /usr/local/bin/opencode

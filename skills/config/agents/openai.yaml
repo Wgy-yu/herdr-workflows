@@ -1,0 +1,6 @@
+interface:
+  display_name: "Herdr Config"
+  short_description: "配置 Herdr Agent 能力、参数和默认分工"
+  default_prompt: "Use $config to configure local Herdr agent capabilities and roles."
+policy:
+  allow_implicit_invocation: true

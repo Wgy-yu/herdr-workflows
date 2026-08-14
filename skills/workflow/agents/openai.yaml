@@ -1,0 +1,6 @@
+interface:
+  display_name: "Herdr Workflow"
+  short_description: "配置项目级 Herdr 角色、步骤和工作流门禁"
+  default_prompt: "Use $workflow to configure a project Herdr multi-agent workflow."
+policy:
+  allow_implicit_invocation: true

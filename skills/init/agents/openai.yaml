@@ -1,0 +1,6 @@
+interface:
+  display_name: "Herdr Init"
+  short_description: "初始化 Agent、Superpowers、全局配置与项目工作流"
+  default_prompt: "Use $init to initialize Herdr agents, Superpowers, and the project workflow."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Herdr Review"
+  short_description: "启动 Herdr 多 Agent 共享 Markdown 评审与最终裁决"
+  default_prompt: "Use $review to run a source-read-only Herdr review in one shared Markdown review sheet."
+policy:
+  allow_implicit_invocation: true

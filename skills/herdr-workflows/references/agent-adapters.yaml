@@ -1,0 +1,60 @@
+# 已验证 Agent 启动适配器。
+# 只收录经当前 CLI 帮助验证的参数；Herdr 支持但未收录的 kind 在 check 时
+# 标记为 unsupported_adapter，不得猜测参数或安装操作。
+# 验证日期：2026-08-13，验证方式：本机 `claude --help`、`opencode --help`、`codex --help`。
+#
+# 字段说明：
+#   kind                Herdr Agent 类型
+#   commands            常见可执行命令（按顺序探测）
+#   version_args        版本检测参数
+#   elevated_args       最大权限启动参数（仅用于消除普通本地权限提示，不扩大业务授权）
+#   model_args          模型参数格式
+#   windows_shim        Windows 下为 .ps1 shim 时的启动方式（pane_run）；原生 EXE 用 agent_start
+#   superpowers.*       Superpowers 检测位置、官方来源与已验证的安装方式
+claude:
+  kind: claude
+  commands: [claude]
+  version_args: [--version]
+  elevated_args:
+    - --dangerously-skip-permissions
+  model_args:
+    - --model
+  windows_shim: pane_run
+  superpowers:
+    detect_dir: "%USERPROFILE%\\.claude\\plugins\\cache\\superpowers-marketplace"
+    detect_pattern: null
+    source: "https://github.com/obra/superpowers"
+    install: "/plugin install superpowers@superpowers-marketplace"
+    install_note: "在 Claude Code 内执行；插件安装位置为 ~/.claude/plugins/cache/"
+
+opencode:
+  kind: opencode
+  commands: [opencode]
+  version_args: [--version]
+  elevated_args:
+    - --auto
+  model_args:
+    - -m
+  windows_shim: pane_run
+  superpowers:
+    detect_dir: "%USERPROFILE%\\.config\\opencode\\skills"
+    detect_pattern: "superpowers-*"
+    source: "https://github.com/obra/superpowers"
+    install: null
+    install_note: "按 https://raw.githubusercontent.com/obra/superpowers/refs/heads/main/.opencode/INSTALL.md 指示安装"
+
+codex:
+  kind: codex
+  commands: [codex]
+  version_args: [--version]
+  elevated_args:
+    - --dangerously-bypass-approvals-and-sandbox
+  model_args:
+    - -m
+  windows_shim: agent_start
+  superpowers:
+    detect_dir: "%USERPROFILE%\\.codex\\plugins\\cache\\superpowers-marketplace"
+    detect_pattern: null
+    source: "https://github.com/obra/superpowers"
+    install: null
+    install_note: "官方 Codex 插件市场 https://github.com/openai/plugins 中搜索 Superpowers 安装"

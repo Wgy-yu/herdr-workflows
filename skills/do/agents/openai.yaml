@@ -1,0 +1,6 @@
+interface:
+  display_name: "Herdr Do"
+  short_description: "启动 Herdr 多 Agent 开发、返修与验收闭环"
+  default_prompt: "Use $do to run a Herdr multi-agent implementation workflow."
+policy:
+  allow_implicit_invocation: true

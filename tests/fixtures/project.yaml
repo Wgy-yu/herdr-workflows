@@ -1,0 +1,36 @@
+# 项目覆盖配置：只保存可共享内容，不含秘密、用户目录或本机绝对路径。
+default_workflow: claude-implement-opencode-review
+workflows:
+  claude-implement-opencode-review:
+    # 角色绑定：Codex 主持，Claude 实施，OpenCode 只读审核。
+    leader: codex
+    implementer: claude
+    reviewer: opencode
+    reviewer_read_only: true
+    steps:
+      design:
+        enabled: true
+        skill: superpowers:brainstorming
+      plan:
+        enabled: true
+        skill: superpowers:writing-plans
+      implement:
+        enabled: true
+      review:
+        enabled: true
+      rework:
+        enabled: true
+      final:
+        enabled: true
+    max_rework: 5
+    takeover_on_exceed: leader
+    pass_condition: reviewer_pass_and_leader_approve
+    fail_condition: rework_limit_exceeded
+  opencode-implement-claude-review:
+    # 备选工作流：OpenCode 实施，Claude 审核，可被命令行选择覆盖默认。
+    leader: codex
+    implementer: opencode
+    reviewer: claude
+    reviewer_read_only: true
+    max_rework: 3
+    takeover_on_exceed: leader

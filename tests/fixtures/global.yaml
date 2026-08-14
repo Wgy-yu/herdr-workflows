@@ -1,0 +1,24 @@
+# 全局默认配置：仅保存本机相关内容（命令、启动参数、模型与默认角色资格）。
+# 最大权限启动参数只用于消除普通本地权限提示，不扩大任何业务授权边界。
+agents:
+  claude:
+    kind: claude
+    command: claude
+    elevated_args:
+      - --dangerously-skip-permissions
+    elevated_enabled: true
+    model: null
+    model_args: []
+    # 默认角色资格：仅作为未绑定工作流时的回退，项目工作流优先。
+    default_role: reviewer
+    superpowers: unknown
+  opencode:
+    kind: opencode
+    command: opencode
+    elevated_args:
+      - --auto
+    elevated_enabled: true
+    model: null
+    model_args: []
+    default_role: implementer
+    superpowers: unknown

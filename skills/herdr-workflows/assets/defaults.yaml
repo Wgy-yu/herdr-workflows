@@ -1,0 +1,14 @@
+# 插件内置默认工作流：只包含逻辑默认值。
+# Agent 本机命令和模型不写入共享默认配置，由用户全局配置管理。
+default_workflow: default
+workflows:
+  default:
+    # 首次安装由 $herdr-workflows:init 让用户明确选择角色，不预设 Codex 或其他 Agent。
+    leader: null
+    implementer: null
+    reviewer: null
+    # Reviewer 对业务源码只读；review 模式仍可追加本轮共享 Markdown 评审单。
+    reviewer_read_only: true
+    # 最大返修 5 次，超过上限由 Leader 接管。
+    max_rework: 5
+    takeover_on_exceed: leader
