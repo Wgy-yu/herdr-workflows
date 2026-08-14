@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,22 @@ import {
   findAgentTarget,
 } from "../herdr-event-bridge.mjs";
 import { readWorkflowState, startWorkflow } from "../workflow-state.mjs";
+
+function bridgeFixture(prefix) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  const project = join(root, "repo");
+  mkdirSync(join(project, ".herdr"), { recursive: true });
+  writeFileSync(join(project, ".herdr", "workflows.yaml"), [
+    "default_workflow: default", "workflows:", "  default:",
+    "    leader: codex-leader", "    implementer: opencode", "    reviewer: claude",
+  ].join("\n"), "utf8");
+  const env = {
+    HERDR_PLUGIN_EVENT_JSON: JSON.stringify({ type: "pane_agent_status_changed", pane_id: "w1:p2", workspace_id: "w1", agent: "opencode", agent_status: "done" }),
+    HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_cwd: project, workspace_id: "w1" }),
+    HERDR_PLUGIN_ROOT: fileURLToPath(new URL("..", import.meta.url)), USERPROFILE: root,
+  };
+  return { root, project, env };
+}
 
 test("解析 Herdr 0.8 真实 Agent 状态事件并归一化订阅名", () => {
   const event = parseEvent(
@@ -99,9 +115,10 @@ test("事件键优先使用 Herdr 状态序号，避免重复通知", () => {
   assert.equal(
     eventKey(
       { workspaceId: "w1", paneId: "w1:p2", agent: "opencode", status: "done" },
-      "IMPLEMENTATION_RUNNING"
+      "IMPLEMENTATION_RUNNING",
+      "run-1"
     ),
-    "w1:w1:p2:opencode:done:IMPLEMENTATION_RUNNING"
+    "run-1:w1:w1:p2:opencode:done:IMPLEMENTATION_RUNNING"
   );
 });
 
@@ -112,6 +129,16 @@ test("按工作区和 Agent 名称找到目标 pane", () => {
   ];
   assert.equal(findAgentTarget(agents, "claude", "w1"), "w1:p3");
   assert.equal(findAgentTarget(agents, "missing", "w1"), null);
+  assert.equal(findAgentTarget(agents, "claude", "w3"), null);
+  assert.equal(findAgentTarget([{ name: "claude", pane_id: "p3" }], "claude", "w1"), null);
+});
+
+test("无 revision 的事件键包含 runId，下一轮不会碰撞", () => {
+  const event = { workspaceId: "w1", paneId: "w1:p2", agent: "opencode", status: "done" };
+  assert.notEqual(
+    eventKey(event, "IMPLEMENTATION_RUNNING", "run-1"),
+    eventKey(event, "IMPLEMENTATION_RUNNING", "run-2")
+  );
 });
 
 test("事件处理通过官方 agent.prompt 直达下一角色并写入共享记录", async () => {
@@ -222,4 +249,52 @@ test("未通过 dispatch 启动时 done 事件不能推进工作流", async () =
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("agent.prompt 失败时不推进状态且相同事件可以重放", async () => {
+  const fixture = bridgeFixture("herdr-workflows-replay-");
+  let promptAttempts = 0;
+  try {
+    startWorkflow(fixture.project, "default");
+    const request = async (method) => {
+      if (method === "agent.list") return { result: { agents: [
+        { name: "opencode", pane_id: "w1:p2", workspace_id: "w1" },
+        { name: "claude", pane_id: "w1:p3", workspace_id: "w1" },
+      ] } };
+      if (method === "agent.prompt" && ++promptAttempts === 1) throw new Error("socket closed");
+      return { result: { ok: true } };
+    };
+    const failed = await handleEvent({ env: fixture.env, request });
+    assert.equal(failed.reason, "delivery-failed");
+    assert.equal(readWorkflowState(fixture.project).status, "IMPLEMENTATION_RUNNING");
+    const replayed = await handleEvent({ env: fixture.env, request });
+    assert.equal(replayed.handled, true);
+    assert.equal(readWorkflowState(fixture.project).status, "REVIEW_RUNNING");
+  } finally { rmSync(fixture.root, { recursive: true, force: true }); }
+});
+
+test("并发重复事件只投递并提交一次", async () => {
+  const fixture = bridgeFixture("herdr-workflows-concurrent-");
+  let prompts = 0;
+  try {
+    startWorkflow(fixture.project, "default");
+    const request = async (method) => {
+      if (method === "agent.list") return { result: { agents: [
+        { name: "opencode", pane_id: "w1:p2", workspace_id: "w1" },
+        { name: "claude", pane_id: "w1:p3", workspace_id: "w1" },
+      ] } };
+      if (method === "agent.prompt") {
+        prompts += 1;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+      }
+      return { result: { ok: true } };
+    };
+    const results = await Promise.all([
+      handleEvent({ env: fixture.env, request }),
+      handleEvent({ env: fixture.env, request }),
+    ]);
+    assert.equal(prompts, 1);
+    assert.equal(results.filter((result) => result.handled).length, 1);
+    assert.equal(readWorkflowState(fixture.project).status, "REVIEW_RUNNING");
+  } finally { rmSync(fixture.root, { recursive: true, force: true }); }
 });

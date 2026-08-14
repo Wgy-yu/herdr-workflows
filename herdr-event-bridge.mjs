@@ -9,7 +9,7 @@ import { dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { mergeConfig, parseYamlFile } from "./skills/herdr-workflows/scripts/config-tool.mjs";
-import { readWorkflowState, transitionWorkflow } from "./workflow-state.mjs";
+import { canTransitionWorkflow, nextWorkflowStatus, readWorkflowState, transitionWorkflowUnlocked, withWorkflowLock } from "./workflow-state.mjs";
 
 const DEFAULT_EVENT = "pane.agent_status_changed";
 const ROUTABLE_STATUSES = new Set(["done", "blocked"]);
@@ -147,15 +147,15 @@ export function buildNotification({ fromRole, toRole, reason, event, ledgerPath 
 }
 
 /** 只对带有 Herdr 状态序号的事件去重，避免吞掉没有序号的合法后续事件。 */
-export function eventKey(event, workflowStatus = null) {
+export function eventKey(event, workflowStatus = null, runId = null) {
   if (!event.workspaceId || !event.paneId || !event.status) {
     return null;
   }
   if (event?.revision !== null && event?.revision !== undefined) {
     return `${event.workspaceId}:${event.paneId}:${event.status}:${event.revision}`;
   }
-  if (!event.agent || !workflowStatus) return null;
-  return `${event.workspaceId}:${event.paneId}:${event.agent}:${event.status}:${workflowStatus}`;
+  if (!event.agent || !workflowStatus || !runId) return null;
+  return `${runId}:${event.workspaceId}:${event.paneId}:${event.agent}:${event.status}:${workflowStatus}`;
 }
 
 function recordFields(record) {
@@ -179,14 +179,10 @@ export function findAgentTarget(agents, agentName, workspaceId) {
     return null;
   }
   const normalized = agents.map(recordFields).filter((record) => record.target);
-  const inWorkspace = normalized.filter(
-    (record) => !workspaceId || !record.workspaceId || record.workspaceId === workspaceId
-  );
-  return (
-    inWorkspace.find((record) => sameAgent(record.name, agentName))?.target ??
-    normalized.find((record) => sameAgent(record.name, agentName))?.target ??
-    null
-  );
+  if (!workspaceId) return null;
+  return normalized.find(
+    (record) => record.workspaceId === workspaceId && sameAgent(record.name, agentName)
+  )?.target ?? null;
 }
 
 function extractAgents(response) {
@@ -258,7 +254,7 @@ function parseContext(raw) {
   const value = parseJson(raw);
   const workspace = isObject(value.workspace) ? value.workspace : {};
   return {
-    cwd: firstString(value.cwd, value.project_root, value.projectRoot, workspace.cwd, workspace.root),
+    cwd: firstString(value.workspace_cwd, value.focused_pane_cwd, value.cwd, value.project_root, value.projectRoot, workspace.cwd, workspace.root),
     workspaceId: firstString(value.workspace_id, value.workspaceId, workspace.workspace_id, workspace.workspaceId),
   };
 }
@@ -309,7 +305,8 @@ function hasDeliveredEvent(ledgerPath, key) {
       .some((line) => {
         try {
           const record = JSON.parse(line);
-          return record.eventKey === key && record.delivered === true;
+          return record.eventKey === key && record.delivered === true &&
+            ["transition_committed", "blocked_committed"].includes(record.type);
         } catch {
           return false;
         }
@@ -395,77 +392,38 @@ export async function handleEvent(options = {}) {
   }
 
   const ledgerPath = join(projectRoot, ".herdr", "workflow-events.jsonl");
-  const workflowState = readWorkflowState(projectRoot);
-  const key = eventKey(event, workflowState.status);
-  if (hasDeliveredEvent(ledgerPath, key)) {
-    return { handled: false, reason: "duplicate-event", event, route, eventKey: key };
-  }
-
-  let nextWorkflowState;
-  try {
-    nextWorkflowState = transitionWorkflow(projectRoot, route.reason, key);
-  } catch (error) {
-    return {
-      handled: false,
-      reason: "workflow-state-not-routable",
-      error: error.message,
-      event,
-      route,
-      eventKey: key,
-      workflowState,
-    };
-  }
-
-  const targetAgent = workflow[route.toRole];
-  const target = findAgentTarget(agents, targetAgent, event.workspaceId);
-  const message = buildNotification({
-    ...route,
-    event,
-    ledgerPath,
-  });
-  let delivered = false;
-  let delivery = "ledger-only";
-  if (target && target !== event.paneId) {
+  return withWorkflowLock(projectRoot, async () => {
+    const workflowState = readWorkflowState(projectRoot);
+    const key = eventKey(event, workflowState.status, workflowState.runId);
+    if (!canTransitionWorkflow(workflowState.status, route.reason)) {
+      return { handled: false, reason: "workflow-state-not-routable", error: `非法工作流迁移：${workflowState.status} + ${route.reason}`, event, route, eventKey: key, workflowState };
+    }
+    if (hasDeliveredEvent(ledgerPath, key)) {
+      return { handled: false, reason: "duplicate-event", event, route, eventKey: key };
+    }
+    const targetAgent = workflow[route.toRole];
+    const target = findAgentTarget(agents, targetAgent, event.workspaceId);
+    const message = buildNotification({ ...route, event, ledgerPath });
     try {
+      if (!target || target === event.paneId) throw new Error("当前 workspace 中找不到目标 Agent");
       await request("agent.prompt", { target, text: message });
-      delivered = true;
-      delivery = "agent.prompt";
-    } catch {
-      // 目标 Agent 可能刚好退出，下面的 UI 通知仍会提醒用户。
+    } catch (error) {
+      appendLedger(ledgerPath, { at: new Date().toISOString(), type: "delivery_failed", eventKey: key, event, route, target, error: error.message, delivered: false, workflowStatus: workflowState.status });
+      try {
+        await request("notification.show", { title: notificationTitle(route), body: message, sound: "request" });
+      } catch {}
+      return { handled: false, reason: "delivery-failed", event, route, target, eventKey: key, workflowStatus: workflowState.status };
     }
-  }
-  if (!delivered) {
+    appendLedger(ledgerPath, { at: new Date().toISOString(), type: "transition_pending", eventKey: key, event, route, target, delivery: "agent.prompt", delivered: true, runId: workflowState.runId, fromStatus: workflowState.status, toStatus: nextWorkflowStatus(workflowState.status, route.reason) });
+    let nextWorkflowState;
     try {
-      await request("notification.show", {
-        title: notificationTitle(route),
-        body: message,
-        sound: route.reason === "review_done" ? "done" : "request",
-      });
-      delivery = "notification.show";
-    } catch {
-      // 无 UI 时仍保留共享事件记录。
+      nextWorkflowState = transitionWorkflowUnlocked(projectRoot, route.reason, key);
+    } catch (error) {
+      return { handled: false, reason: "workflow-state-not-routable", error: error.message, event, route, eventKey: key, workflowState };
     }
-  }
-  appendLedger(ledgerPath, {
-    at: new Date().toISOString(),
-    eventKey: key,
-    event,
-    route,
-    target,
-    delivery,
-    delivered,
-    workflowStatus: nextWorkflowState.status,
+    appendLedger(ledgerPath, { at: new Date().toISOString(), type: route.reason.includes("blocked") ? "blocked_committed" : "transition_committed", eventKey: key, event, route, target, delivery: "agent.prompt", delivered: true, runId: nextWorkflowState.runId, workflowStatus: nextWorkflowState.status });
+    return { handled: true, event, route, target, delivery: "agent.prompt", delivered: true, ledgerPath, workflowStatus: nextWorkflowState.status };
   });
-  return {
-    handled: true,
-    event,
-    route,
-    target,
-    delivery,
-    delivered,
-    ledgerPath,
-    workflowStatus: nextWorkflowState.status,
-  };
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

@@ -4,7 +4,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { findAgentTarget, requestSocket } from "./herdr-event-bridge.mjs";
 import { mergeConfig, parseYamlFile } from "./skills/herdr-workflows/scripts/config-tool.mjs";
-import { blockWorkflow, startWorkflow } from "./workflow-state.mjs";
+import { appendWorkflowEvent, readWorkflowState, startWorkflowUnlocked, withWorkflowLock } from "./workflow-state.mjs";
+
+export function contextStartPath(context = {}) {
+  return context.workspace_cwd ?? context.focused_pane_cwd ?? null;
+}
 
 function findProjectRoot(startPath) {
   let current = resolve(startPath);
@@ -38,22 +42,30 @@ export async function dispatchWorkflow(options) {
   const target = findAgentTarget(agents, workflow.implementer, workspaceId);
   if (!target) throw new Error(`找不到实施者 Agent：${workflow.implementer}`);
 
-  const state = startWorkflow(projectRoot, workflow.name ?? "default");
-  try {
-    await request("agent.prompt", {
-      target,
-      text: `【Herdr Workflows 实施任务】\n共享计划：${planPath}\n\n${plan}`,
-    });
-  } catch (error) {
-    blockWorkflow(projectRoot, "dispatch_failed");
-    throw new Error(`实施任务下发失败，工作流已进入 BLOCKED：${error.message}`);
-  }
-  return { ...state, target, planPath };
+  return withWorkflowLock(projectRoot, async () => {
+    const current = readWorkflowState(projectRoot);
+    if (!["READY", "FINAL_DECISION_PENDING", "BLOCKED"].includes(current.status)) {
+      throw new Error(`当前状态不允许 dispatch：${current.status}`);
+    }
+    try {
+      await request("agent.prompt", {
+        target,
+        text: `【Herdr Workflows 实施任务】\n共享计划：${planPath}\n\n${plan}`,
+      });
+    } catch (error) {
+      appendWorkflowEvent(projectRoot, { type: "dispatch_failed", status: current.status, error: error.message });
+      throw new Error(`实施任务下发失败，状态保持 ${current.status}：${error.message}`);
+    }
+    appendWorkflowEvent(projectRoot, { type: "dispatch_pending", fromStatus: current.status, toStatus: "IMPLEMENTATION_RUNNING", target });
+    const state = startWorkflowUnlocked(projectRoot, workflow.name ?? "default");
+    appendWorkflowEvent(projectRoot, { type: "dispatch_committed", runId: state.runId, status: state.status, target });
+    return { ...state, target, planPath };
+  });
 }
 
 async function main(env = process.env) {
   const context = env.HERDR_PLUGIN_CONTEXT_JSON ? JSON.parse(env.HERDR_PLUGIN_CONTEXT_JSON) : {};
-  const projectRoot = findProjectRoot(context.cwd ?? process.cwd());
+  const projectRoot = findProjectRoot(contextStartPath(context) ?? process.cwd());
   if (!projectRoot) throw new Error("当前目录不在已配置 Herdr Workflows 项目内");
   const pluginRoot = env.HERDR_PLUGIN_ROOT ?? dirname(fileURLToPath(import.meta.url));
   const workflow = loadWorkflow(projectRoot, pluginRoot, env);

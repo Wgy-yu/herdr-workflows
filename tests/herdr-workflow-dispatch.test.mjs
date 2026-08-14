@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { dispatchWorkflow } from "../herdr-workflow-dispatch.mjs";
+import { dispatchWorkflow, contextStartPath } from "../herdr-workflow-dispatch.mjs";
 import { readWorkflowState } from "../workflow-state.mjs";
 
 test("dispatch 读取共享计划、无等待通知实施者并立即进入实施阶段", async () => {
@@ -36,7 +36,12 @@ test("dispatch 读取共享计划、无等待通知实施者并立即进入实�
   }
 });
 
-test("dispatch 下发失败进入 BLOCKED 并允许 Leader 修复后重试", async () => {
+test("Herdr 0.8 Action 上下文优先使用 workspace_cwd 和 focused_pane_cwd", () => {
+  assert.equal(contextStartPath({ workspace_cwd: "C:/repo", focused_pane_cwd: "C:/repo/sub" }), "C:/repo");
+  assert.equal(contextStartPath({ focused_pane_cwd: "C:/repo/sub" }), "C:/repo/sub");
+});
+
+test("dispatch 下发失败保持 READY 并允许 Leader 重试", async () => {
   const root = mkdtempSync(join(tmpdir(), "herdr-workflow-dispatch-failure-"));
   try {
     mkdirSync(join(root, ".herdr"), { recursive: true });
@@ -55,7 +60,9 @@ test("dispatch 下发失败进入 BLOCKED 并允许 Leader 修复后重试", asy
       }),
       /下发失败/
     );
-    assert.equal(readWorkflowState(root).status, "BLOCKED");
+    assert.equal(readWorkflowState(root).status, "READY");
+    const ledger = readFileSync(join(root, ".herdr", "workflow-events.jsonl"), "utf8");
+    assert.match(ledger, /dispatch_failed/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
