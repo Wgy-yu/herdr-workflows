@@ -31,6 +31,7 @@ const DEFAULTS = {
       implementer: "opencode",
       reviewer: "claude",
       reviewer_read_only: true,
+      use_superpowers: true,
       max_rework: 5,
       takeover_on_exceed: "leader",
     },
@@ -52,6 +53,7 @@ test("插件默认工作流不预设 Codex 或其他 Agent 为 Leader", () => {
   assert.equal(workflow.reviewer, null);
   assert.equal(workflow.role_rotation.enabled, false);
   assert.equal(workflow.role_rotation.interval_minutes, 120);
+  assert.equal(workflow.use_superpowers, true);
 });
 
 test("init 入口声明配置、Superpowers 与 Agent 直连能力", () => {
@@ -64,9 +66,11 @@ test("init 入口声明配置、Superpowers 与 Agent 直连能力", () => {
   assert.match(workflowsSkill, /agent\.send_keys/);
   assert.match(workflowsSkill, /role_rotation/);
   assert.match(workflowsSkill, /模型能力不要差距过大/);
+  assert.match(workflowsSkill, /use_superpowers/);
+  assert.match(workflowsSkill, /至少三个不同 Agent/);
 });
 
-test("角色轮换配置合并并保留 Agent 能力等级", () => {
+test("角色轮换配置合并并可关闭 Superpowers", () => {
   const defaults = {
     ...DEFAULTS,
     workflows: {
@@ -77,8 +81,8 @@ test("角色轮换配置合并并保留 Agent 能力等级", () => {
           enabled: false,
           interval_minutes: 120,
           max_switches: 2,
-          capability_gap_warning: true,
         },
+        use_superpowers: true,
       },
     },
   };
@@ -86,13 +90,17 @@ test("角色轮换配置合并并保留 Agent 能力等级", () => {
     default_workflow: "opencode-implement-claude-review",
     workflows: {
       "opencode-implement-claude-review": {
+        leader: "codex",
+        implementer: "opencode",
+        reviewer: "claude",
         role_rotation: { enabled: true, interval_minutes: 60, max_switches: 1 },
+        use_superpowers: false,
       },
     },
   };
   const merged = mergeConfig(
     defaults,
-    { agents: { opencode: { capability_tier: 4 }, claude: { capability_tier: 3 } } },
+    { agents: { opencode: { superpowers: "absent" }, claude: { superpowers: "present" } } },
     project,
     {}
   );
@@ -100,10 +108,8 @@ test("角色轮换配置合并并保留 Agent 能力等级", () => {
     enabled: true,
     intervalMinutes: 60,
     maxSwitches: 1,
-    capabilityGapWarning: true,
   });
-  assert.equal(merged.agents.opencode.capabilityTier, 4);
-  assert.equal(merged.agents.claude.capabilityTier, 3);
+  assert.equal(merged.workflow.useSuperpowers, false);
 });
 
 test("项目配置覆盖全局角色但保留全局启动参数", () => {
@@ -202,17 +208,30 @@ test("已知字段类型错误仍拒绝", () => {
     globalErrors.some((error) => error.includes("elevated_args")),
     `已知字段类型错误未被拒绝，实际错误：${JSON.stringify(globalErrors)}`
   );
-  const capabilityErrors = validateGlobalConfig({ agents: { claude: { capability_tier: 6 } } });
+  const superpowersErrors = validateProjectConfig({
+    workflows: { demo: { use_superpowers: "yes" } },
+  });
   assert.ok(
-    capabilityErrors.some((error) => error.includes("capability_tier")),
-    `能力等级越界未被拒绝，实际错误：${JSON.stringify(capabilityErrors)}`
+    superpowersErrors.some((error) => error.includes("use_superpowers")),
+    `use_superpowers 类型错误未被拒绝，实际错误：${JSON.stringify(superpowersErrors)}`
   );
   const rotationErrors = validateProjectConfig({
-    workflows: { demo: { role_rotation: { interval_minutes: 0 } } },
+    workflows: {
+      demo: {
+        leader: "codex",
+        implementer: "claude",
+        reviewer: "codex",
+        role_rotation: { enabled: true, interval_minutes: 0 },
+      },
+    },
   });
   assert.ok(
     rotationErrors.some((error) => error.includes("role_rotation.interval_minutes")),
     `轮换间隔错误未被拒绝，实际错误：${JSON.stringify(rotationErrors)}`
+  );
+  assert.ok(
+    rotationErrors.some((error) => error.includes("至少三个不同 Agent")),
+    `少于三个 Agent 时轮换未被拒绝，实际错误：${JSON.stringify(rotationErrors)}`
   );
 });
 

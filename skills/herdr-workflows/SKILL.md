@@ -80,7 +80,7 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
 4. 插件默认：`assets/defaults.yaml`。
 
 - 全局配置保存本机相关内容（Agent 命令、启动参数、模型参数、最大权限参数、默认角色资格）。
-- 项目配置只保存可共享内容（角色绑定、步骤顺序、门禁、返修次数、完成条件）；
+- 项目配置只保存可共享内容（角色绑定、步骤顺序、Superpowers 开关、门禁、返修次数、完成条件）；
   禁止秘密、用户目录绝对路径和只在单台机器成立的可执行文件路径。
 - 配置统一使用 UTF-8 YAML，可包含中文 `#` 注释；强制规则必须用正式字段表达，
   不能只写在注释里。字段、合并与安全规则的完整定义见 `references/config-schema.md`。
@@ -110,13 +110,13 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
    ok|empty|failed|skipped 机器判定，不使用 launch_error——check 不启动 Agent）、
    `not_installed`（未安装）、`unsupported_adapter`（Herdr 支持但插件尚无适配器）；
    最大权限参数 `elevated_verified=false` 表示帮助未包含适配器参数，不得猜测参数启动。
-4. Superpowers 缺失时（`superpowers_status=absent`），只读展示该 Agent 的官方来源、
+4. 当项目工作流 `use_superpowers=true` 且 Superpowers 缺失时（`superpowers_status=absent`），只读展示该 Agent 的官方来源、
    目标目录和完整安装说明（来自 `references/agent-adapters.yaml` 的 `superpowers` 字段）。
    `mode=check` 不执行安装；首次安装请使用 `mode=init`，由 init 逐个询问并在存在已验证
    `superpowers.install` 且用户确认后执行，安装后重新检查目标目录和可发现状态。
 5. 禁止：静默批量安装、覆盖已存在目录、从非官方来源安装、因目录名称相同就宣称安装成功。
-6. 终止条件：输出状态表和每个未就绪项的处理建议；Superpowers 被用户拒绝时，
-   依赖 Superpowers 的工作流不得假装通过门禁，明确记录缺口。
+6. 终止条件：输出状态表和每个未就绪项的处理建议；`use_superpowers=true` 时，
+   Superpowers 被用户拒绝不得假装通过门禁；`use_superpowers=false` 时只记录为未启用，不阻塞工作流。
 
 ## mode=init：首次安装初始化
 
@@ -130,20 +130,20 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 2. 汇总 `available`/`available_with_warnings` Agent，展示 kind、命令、启动方式、最大权限
    参数验证状态和 Superpowers 状态。`not_installed`、`unsupported_adapter` 或未验证最大
    权限参数的 Agent 不能被静默纳入角色。
-3. 让用户明确选择 Leader、实施者和审核者。没有明确选择时保持 `null` 并停止进入工作流；
+3. 让用户明确选择 Leader、实施者和审核者，并明确选择该工作流是否 `use_superpowers`。没有明确选择角色时保持 `null` 并停止进入工作流；
    不按当前客户端、Agent 排序或插件默认值推断 Leader。允许同一 Agent 承担多个角色，但
    必须把该决定写入项目配置并在摘要中提示。
-4. 对用户选中的每个 Agent 处理 Superpowers：按适配器启动并确认目标 Agent 已就绪；已存在则记录；缺失且适配器有非空、已验证的
+4. 仅当用户确认 `use_superpowers=true` 时，对用户选中的每个 Agent 处理 Superpowers：按适配器启动并确认目标 Agent 已就绪；已存在则记录；缺失且适配器有非空、已验证的
    `install` 时，逐个展示来源与命令，取得该 Agent 的单独确认后，通过 `agent.prompt` 直接
    发送安装指令并等待回执，再重新检查；`install: null` 时只展示官方说明并标记为待用户手动
    完成，禁止自行拼接安装命令或宣称已安装。
 5. 使用 `scripts/config-tool.mjs update` 写入全局 Agent 配置（只写明确字段、保留未知字段）
    并校验；不得把 API Key、Token、密码或其他秘密写入配置。
 6. 使用同一个结构化 `update` 工具创建或更新项目 `<repo>/.herdr/workflows.yaml`：设置
-   `default_workflow`、所选工作流的 `leader`/`implementer`/`reviewer`、审查只读约束、返修
+   `default_workflow`、所选工作流的 `leader`/`implementer`/`reviewer`、`use_superpowers`、审查只读约束、返修
    次数、通过条件和可选 `role_rotation`；不得手工拼接 YAML。已有项目绑定保留，只有用户确认的字段才覆盖。
 7. 运行项目校验与 `config-tool.mjs merge`，输出全局配置、项目工作流、角色映射、Superpowers
-   状态及待办。只有三类角色已明确绑定、配置校验通过且安装门禁满足时才输出 `INIT_READY`；
+   状态及待办。只有三类角色已明确绑定、配置校验通过且（`use_superpowers=true` 时）安装门禁满足时才输出 `INIT_READY`；
    否则输出 `INIT_INCOMPLETE` 和阻塞项。除非用户明确指定立即运行，否则初始化到此结束。
 8. 若运行在 Herdr 环境且用户确认，检查并注册外置事件桥接：优先使用
    `herdr plugin install Wgy-yu/herdr-workflows --yes`，本地开发使用
@@ -173,7 +173,9 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 1. 项目可定义多个命名工作流和一个默认工作流；每个工作流至少包含：Leader、实施者、
    审核者角色绑定；设计、计划、实施、审查、返修和最终验收的步骤顺序；各步骤是否
    启用及所需 Skill；Reviewer 源码只读约束；最大返修次数与超限接管者；通过和拒绝的输出条件。
-   可选开启 `role_rotation`，允许实施者与审查者在阶段边界轮换；默认关闭。
+   必须明确 `use_superpowers` 是否启用；可选开启 `role_rotation`，允许实施者与审查者在阶段边界轮换；默认关闭。
+   开启角色轮换时，Leader、实施者、审查者必须是至少三个不同 Agent；轮换前只提示用户
+   “两个 Agent 的模型能力不要差距过大”，不采集或比较真实模型能力。
 2. 写入必须使用结构化 update，精确调用：
    `node scripts/config-tool.mjs update --file "<repo>/.herdr/workflows.yaml" --scope project --set '{"workflows.<name>.<字段>":"<值>"}'`；
    写入后运行 `--scope project` 校验和合并命令确认有效配置。
@@ -220,8 +222,9 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 2. 按工作流执行设计与用户确认门禁（用户未确认不得进入实施）。
 3. 生成可执行计划并完成实施者的计划读取回执（逐字符核对）。
 4. 实施者修改代码并提供 diff 与验证证据。
-5. 审核者只读复核；Leader 使用 `superpowers:receiving-code-review` 验证审查意见，
-   不盲从审核结论。
+5. 审核者只读复核；当 `workflow.useSuperpowers=true` 时，Leader 使用
+   `superpowers:receiving-code-review` 验证审查意见，不盲从审核结论；关闭时跳过该 Skill，
+   仍保留审查和最终裁决门禁。
 6. 已确认问题返回实施者返修；达到工作流 `max_rework` 上限后由 `takeover_on_exceed`
    指定的接管者处理，不再自动返修。
 7. 审核者通过后，Leader 独立运行项目检查并作最终裁决。
@@ -232,9 +235,9 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
    触发事实。若事件桥接未启用，才按当前 Herdr 能力使用 `agent.wait`，不得用长时间终端轮询
    模拟等待。桥接通知只负责唤醒下一角色，不替代 Leader 的最终裁决。
 10. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
-   `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
-   轮换前检查全局 Agent 的 `capabilityTier`。任一缺失、差距大于 1，或模型能力无法可靠比较时，
-   先向用户提示“两个 Agent 的模型能力不要差距过大”，得到确认后再切换；未确认则保持原角色。
+       `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
+       配置校验已保证至少三个不同 Agent；每次切换前先向用户提示“两个 Agent 的模型能力不要差距过大”，
+       得到确认后再切换，不读取或比较真实模型能力；未确认则保持原角色。
    `maxSwitches` 用于限制本轮轮换次数。轮换不改变 Reviewer 只读门禁。
 11. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
 
@@ -259,12 +262,13 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 - Agent 为 Windows `.ps1` shim：按当前 Herdr 能力选择 `herdr pane run`；
   不得在已知不兼容时使用 `herdr agent start`。
 - 最大权限参数验证失败：回退为未适配状态，不用猜测的参数启动。
-- Superpowers 缺失：询问安装；用户拒绝后，依赖 Superpowers 的工作流不得假装通过门禁。
+- `use_superpowers=true` 且 Superpowers 缺失：询问安装；用户拒绝后不得假装通过门禁。
+  `use_superpowers=false` 时跳过 Superpowers 安装和 Skill 门禁。
 - init 自动安装：仅执行适配器中已验证且非空的 `superpowers.install`，其余 Agent 只提供官方手动说明。
 - Agent 状态为 unknown、超时或阻塞：读取状态和最近输出后处理，不重复盲发提示。
 - review 模式出现评审单以外的工作树修改：保留现场并报告，不自动回滚用户或 Agent 变更。
 - Agent 点对点通信不可用或双向冒烟失败：停止工作流，不让 Leader 充当人工消息中继。
-- 角色轮换开启但能力等级缺失、差距大于 1 或用户未确认：保持原角色并报告未轮换原因。
+- 角色轮换开启但不足三个不同 Agent 或用户未确认能力差距提示：保持原角色并报告未轮换原因。
 - 配置无效：指出字段路径和原因，不部分写入配置。
 
 ## 适配器与新增 Agent

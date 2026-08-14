@@ -136,13 +136,6 @@ export function validateGlobalConfig(value) {
         ) {
           errors.push(`${base}.elevated_enabled 必须是布尔值`);
         }
-        if (
-          entry.capability_tier !== undefined &&
-          entry.capability_tier !== null &&
-          (!Number.isInteger(entry.capability_tier) || entry.capability_tier < 1 || entry.capability_tier > 5)
-        ) {
-          errors.push(`${base}.capability_tier 必须是 1 到 5 的整数`);
-        }
       }
     }
   }
@@ -200,6 +193,13 @@ export function validateProjectConfig(value) {
           errors.push(`${base}.reviewer_read_only 必须是布尔值`);
         }
         if (
+          workflow.use_superpowers !== undefined &&
+          workflow.use_superpowers !== null &&
+          typeof workflow.use_superpowers !== "boolean"
+        ) {
+          errors.push(`${base}.use_superpowers 必须是布尔值`);
+        }
+        if (
           workflow.max_rework !== undefined &&
           workflow.max_rework !== null &&
           (!Number.isInteger(workflow.max_rework) || workflow.max_rework < 0)
@@ -228,12 +228,17 @@ export function validateProjectConfig(value) {
             ) {
               errors.push(`${base}.role_rotation.max_switches 必须是非负整数`);
             }
-            if (
-              rotation.capability_gap_warning !== undefined &&
-              rotation.capability_gap_warning !== null &&
-              typeof rotation.capability_gap_warning !== "boolean"
-            ) {
-              errors.push(`${base}.role_rotation.capability_gap_warning 必须是布尔值`);
+            if (rotation.enabled === true) {
+              const distinctRoles = new Set(
+                [workflow.leader, workflow.implementer, workflow.reviewer].filter(
+                  (role) => typeof role === "string" && role.trim() !== ""
+                )
+              );
+              if (distinctRoles.size < 3) {
+                errors.push(
+                  `${base}.role_rotation.enabled=true 时必须配置至少三个不同 Agent（Leader、实施者、审查者）`
+                );
+              }
             }
           }
         }
@@ -421,6 +426,7 @@ function normalizeWorkflow(name, workflow, runtime) {
     implementer: runtime.implementer ?? workflow.implementer ?? null,
     reviewer: runtime.reviewer ?? workflow.reviewer ?? null,
     reviewerReadOnly: workflow.reviewer_read_only ?? true,
+    useSuperpowers: workflow.use_superpowers ?? true,
     steps,
     maxRework: workflow.max_rework ?? 5,
     takeoverOnExceed: workflow.takeover_on_exceed ?? "leader",
@@ -428,7 +434,6 @@ function normalizeWorkflow(name, workflow, runtime) {
       enabled: workflow.role_rotation?.enabled ?? false,
       intervalMinutes: workflow.role_rotation?.interval_minutes ?? 120,
       maxSwitches: workflow.role_rotation?.max_switches ?? 2,
-      capabilityGapWarning: workflow.role_rotation?.capability_gap_warning ?? true,
     },
     passCondition: workflow.pass_condition ?? null,
     failCondition: workflow.fail_condition ?? null,
@@ -448,7 +453,6 @@ function normalizeAgents(agents) {
       elevatedEnabled: entry.elevated_enabled ?? true,
       model: entry.model ?? null,
       modelArgs: Array.isArray(entry.model_args) ? [...entry.model_args] : [],
-      capabilityTier: entry.capability_tier ?? null,
       defaultRole: entry.default_role ?? null,
       superpowers: entry.superpowers ?? "unknown",
     };

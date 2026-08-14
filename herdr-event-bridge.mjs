@@ -5,7 +5,7 @@
 // 查询角色并调用 agent.prompt，避免 Leader 轮询或手工转发。
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname, isAbsolute, join, parse, resolve } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { mergeConfig, parseYamlFile } from "./skills/herdr-workflows/scripts/config-tool.mjs";

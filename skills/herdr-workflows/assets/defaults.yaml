@@ -9,6 +9,8 @@ workflows:
     reviewer: null
     # Reviewer 对业务源码只读；review 模式仍可追加本轮共享 Markdown 评审单。
     reviewer_read_only: true
+    # 是否在该工作流中执行 Superpowers Skill 与安装门禁。
+    use_superpowers: true
     # 最大返修 5 次，超过上限由 Leader 接管。
     max_rework: 5
     takeover_on_exceed: leader
@@ -17,4 +19,3 @@ workflows:
       enabled: false
       interval_minutes: 120
       max_switches: 2
-      capability_gap_warning: true
