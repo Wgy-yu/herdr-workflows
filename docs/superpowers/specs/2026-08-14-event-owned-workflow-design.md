@@ -7,19 +7,22 @@
 ## 数据与状态
 
 - 共享计划固定写入项目 `.herdr/workflow-plan.md`。
-- 当前状态写入 `.herdr/workflow-state.json`，使用原子替换保存。
+- 当前状态写入 `.herdr/workflow-state.json`，使用原子替换保存。每次 dispatch 生成新的 `runId`。
 - 状态依次为 `READY`、`IMPLEMENTATION_RUNNING`、`REVIEW_RUNNING`、`FINAL_DECISION_PENDING`；阻塞事件进入 `BLOCKED`。
-- 每次迁移同时追加 `.herdr/workflow-events.jsonl`，作为可审计事件账本。
+- 每次 dispatch、阻塞和迁移都追加 `.herdr/workflow-events.jsonl`，作为恢复依据和可审计事件账本。
+- 项目级锁串行化跨进程读改写；投递成功后才能提交状态迁移，投递失败保持原阶段以便重放。
 
 ## 入口与迁移
 
-插件注册 `dispatch` Action。它读取项目配置和共享计划，通过 Herdr 官方 `agent.list`、`agent.prompt` 将计划发给实施者，将状态从 `READY` 推进到 `IMPLEMENTATION_RUNNING`，随后立即退出，不调用任何等待 API。
+插件注册 `dispatch` Action。它从 Herdr 0.8 的 `workspace_cwd`、`focused_pane_cwd` 定位项目，通过官方 `agent.list`、`agent.prompt` 将计划发给实施者；下发成功后才把状态从 `READY` 推进到 `IMPLEMENTATION_RUNNING`，随后立即退出，不调用任何等待 API。
 
 事件桥监听清单中的 `pane.agent_status_changed`，同时接受载荷中的 `pane.agent_status_changed` 与 `pane_agent_status_changed`。只有符合当前状态的事件能够迁移：实施者完成后唤醒审查者，审查者完成后唤醒 Leader；乱序或重复事件不得推进。
 
 ## 幂等与恢复
 
-有 revision 时使用 Herdr revision 形成事件键；无 revision 时使用工作区、pane、Agent、状态和当前工作流阶段形成稳定键。同一阶段的同一完成事件只投递一次。进程重启后从状态文件和事件账本恢复。
+有 revision 时使用 Herdr revision 形成事件键；无 revision 时使用 `runId`、工作区、pane、Agent、状态和当前工作流阶段形成稳定键。同一工作流实例同一阶段的完成事件只提交一次。目标 Agent 必须严格属于当前 workspace，禁止回退其他 workspace 的同名 Agent。进程重启后从状态文件和事件账本恢复。
+
+`agent.prompt` 是推进流程的成功边界；`notification.show` 只用于诊断。系统选择至少一次投递：崩溃窗口允许重复提醒，但不得因提前推进状态而丢失流程。
 
 ## 测试与兼容性
 

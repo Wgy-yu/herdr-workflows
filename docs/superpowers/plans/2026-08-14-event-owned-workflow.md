@@ -4,7 +4,7 @@
 
 **Goal:** Make the Herdr plugin own do-workflow transitions so the Leader dispatches once and exits while official events wake later roles.
 
-**Architecture:** A small workflow-state module persists and validates transitions. A manifest Action dispatches the shared plan without waiting; the existing event bridge normalizes real Herdr event types and advances only legal states.
+**Architecture:** A workflow-state module serializes project mutations with a lock, records dispatch and transition outcomes in a ledger, and persists a state snapshot. The Action and event bridge use Herdr 0.8 context fields, strictly scope Agent targets to the active workspace, and advance only after `agent.prompt` succeeds.
 
 **Tech Stack:** Node.js ESM, `node:test`, Herdr plugin manifest and Socket API.
 
@@ -13,6 +13,8 @@
 - Do not modify official Herdr code.
 - Do not call `agent.wait` or use the `wait` option of `agent.prompt`.
 - Persist project workflow state beneath `.herdr`.
+- Never fall back to an Agent in another workspace.
+- Failed delivery must leave the current workflow stage retryable.
 
 ---
 
@@ -60,3 +62,19 @@
 - [ ] Document `.herdr/workflow-plan.md`, the dispatch Action, states, diagnostics, and immediate Leader exit.
 - [ ] Update Skill instructions so the standard do path invokes the Action instead of direct prompt/wait logic.
 - [ ] Run the full plugin test suite and repository checks.
+
+### Task 5: Review remediation
+
+**Files:**
+- Modify: `workflow-state.mjs`
+- Modify: `herdr-workflow-dispatch.mjs`
+- Modify: `herdr-event-bridge.mjs`
+- Modify: `tests/workflow-state.test.mjs`
+- Modify: `tests/herdr-workflow-dispatch.test.mjs`
+- Modify: `tests/herdr-event-bridge.test.mjs`
+
+- [ ] Add failing tests for Herdr 0.8 cwd fields and strict workspace matching.
+- [ ] Add failing tests proving failed notifications do not advance state and can be replayed.
+- [ ] Add failing tests for concurrent transitions, dispatch/BLOCKED ledger entries, and a new `runId` per workflow.
+- [ ] Implement project locking, delivery-before-commit ordering, and run-scoped fallback keys.
+- [ ] Run all Node, PowerShell, structure, and syntax checks.
