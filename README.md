@@ -53,6 +53,8 @@ herdr plugin list --plugin wgy.herdr-workflows-bridge
 
 ### Claude Code
 
+参考：[Claude Code 官方安装文档](https://code.claude.com/docs/en/installation)。
+
 Windows PowerShell：
 
 ```powershell
@@ -82,6 +84,8 @@ herdr agent start claude-implementer --kind claude --pane <pane-id>
 ```
 
 ### OpenCode
+
+参考：[OpenCode 官方安装文档](https://dev.opencode.ai/docs)。
 
 macOS、Linux、WSL 或其他 Unix shell 的官方快速安装：
 
