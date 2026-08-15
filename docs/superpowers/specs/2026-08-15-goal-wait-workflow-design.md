@@ -14,7 +14,7 @@
 
 `do` 写入共享计划后调用插件 `dispatch` Action，结束当前动作，后续只由 `pane.agent_status_changed` 事件推进。
 
-`goal` 由 Leader 使用 `agent.prompt ... --wait --timeout <毫秒>` 下发当前阶段；超时后先用 `agent.get` 和 `agent.read` 判断状态，再对仍在运行的同一任务调用 `agent.wait`，不得重复下发。实施完成后同步进入只读审核，审核完成后由 Leader 验证结论、组织返修或最终验收。Goal 模式不调用 `dispatch` Action，不读取或迁移 `.herdr/workflow-state.json`，也不等待事件桥唤醒。
+`goal` 复用参考仓库提交 `6f444d7` 首次发布的 `do` 十一步完整闭环，包括计划读取回执、实施证据、只读审核、审查意见验证、返修上限、超限接管、角色轮换和 Leader 独立验收。调度固定使用带等待回执的 `agent.prompt` 与 `agent.wait`；不得重复下发。Goal 模式不调用 `dispatch` Action，不读取或迁移 `.herdr/workflow-state.json`，也不等待事件桥唤醒。
 
 ## 兼容性与验证
 

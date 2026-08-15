@@ -265,25 +265,31 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 
 ## mode=goal：Agent Goal 等待式开发实施闭环
 
-输入和写入授权与 `mode=do` 相同。该模式适用于当前 Leader 由 Agent Goal 管理生命周期、
-需要在同一 Goal 内等待各阶段完成的场景。
+本模式复用参考仓库 `6f444d7` 首次发布的 `mode=do` 完整闭环，只把完成推进固定为 Herdr
+官方 wait 原语。输入、写入授权和安全边界与 `mode=do` 相同。
 
-1. 解析工作流并完成公共初始化和通信验收。`event_bridge_required` 与事件桥注册状态不构成
-   本模式门禁；mode=goal 不调用插件 `dispatch` Action，也不读取、创建或迁移
-   `.herdr/workflow-state.json`。
-2. 完成设计确认并生成可执行计划，将长篇计划写入共享 Markdown 文件。
-3. Leader 使用 `herdr agent prompt <实施者> <短任务说明与计划路径> --wait --timeout <毫秒>`
-   下发实施任务并等待。调用正常返回后读取实施回复，独立核对 diff 与测试证据。
-4. 等待超时时，先调用 `agent.get` 判断生命周期并用 `agent.read` 读取最近输出：仍在工作时
-   对同一任务调用 `herdr agent wait <实施者>`；已阻塞时处理阻塞；状态未知时检查集成。
-   不得因超时重复发送实施任务。
-5. 实施完成后，以同样的 `agent.prompt ... --wait --timeout` 方式要求审核者只读审查。
-   审核者把完整结论写入共享审核文件；Leader 读取文件并验证审查意见。
-6. 已确认问题按相同等待方式交回实施者返修，再等待审核者复审。达到 `max_rework` 上限后
-   由 `takeover_on_exceed` 指定的接管者处理。
-7. 审核者通过后，Leader 独立运行项目检查并作最终裁决。只有 Leader 可输出最终通过。
-8. Goal 模式的当前回合持续到最终裁决或明确外部阻塞；不输出“等待事件自动唤醒”，不依赖
-   `pane.agent_status_changed` 续跑，也不使用终端轮询代替 Herdr 官方等待原语。
+1. 解析工作流并完成与 mode=review 相同的 Herdr 初始化和通信验收。
+2. 按工作流执行设计与用户确认门禁（用户未确认不得进入实施）。
+3. 生成可执行计划并完成实施者的计划读取回执（逐字符核对）。
+4. 实施者修改代码并提供 diff 与验证证据。
+5. 审核者只读复核；当 `workflow.useSuperpowers=true` 时，Leader 使用
+   `superpowers:receiving-code-review` 验证审查意见，不盲从审核结论；关闭时跳过该 Skill，
+   仍保留审查和最终裁决门禁。
+6. 已确认问题返回实施者返修；达到工作流 `max_rework` 上限后由 `takeover_on_exceed`
+   指定的接管者处理，不再自动返修。
+7. 审核者通过后，Leader 独立运行项目检查并作最终裁决。
+8. 实施者与审核者可通过 Herdr 点对点消息直接澄清证据、交接复核和反馈返修，不由 Leader
+   转发正文；双方不得自行宣布流程结束，实质结论必须对 Leader 可审计，且不得取消 Leader
+   最终裁决。用户可动态指定 Agent 分工。
+9. mode=goal 不使用事件桥推进，不调用插件 `dispatch` Action，也不迁移
+   `.herdr/workflow-state.json`。Leader 使用带等待回执的 `agent.prompt` 下发当前阶段，并用
+   `agent.wait` 等待同一任务完成；不得用长时间终端轮询模拟等待，不得因超时重复派发。
+10. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
+    `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
+    配置校验已保证至少三个不同 Agent；每次切换前先向用户提示“两个 Agent 的模型能力不要差距过大”，
+    得到确认后再切换，不读取或比较真实模型能力；未确认则保持原角色。
+    `maxSwitches` 用于限制本轮轮换次数。轮换不改变 Reviewer 只读门禁。
+11. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
 
 ## 权限和安全边界
 

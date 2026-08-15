@@ -231,10 +231,10 @@ role_rotation:
 
 ## Goal 等待模式
 
-`mode=goal` 用于 Leader 由 Agent Goal 管理生命周期的场景。它不调用事件桥 `dispatch`
-Action，也不依赖 `.herdr/workflow-state.json`；Leader 使用
-`agent.prompt --wait --timeout` 下发并等待实施、审核和返修阶段。等待超时时先读取 Agent
-状态与最近输出，任务仍在运行则用 `agent.wait` 继续等待同一任务，不重复派发。
+`mode=goal` 复用参考仓库首次发布的 `do` 完整闭环：计划读取回执、实施证据、Reviewer
+只读复核、审查意见验证、连续返修、超限接管、角色轮换和 Leader 最终验收均保留。唯一的
+调度差异是固定使用带等待回执的 `agent.prompt` 和 `agent.wait`，不调用事件桥 `dispatch`
+Action，也不依赖 `.herdr/workflow-state.json`。
 
 因此两种开发入口互斥：`do` 只由官方状态事件推进，`goal` 只由当前 Goal 内的官方等待
 原语推进。两者共享 Reviewer 只读、返修上限和 Leader 最终裁决规则。
