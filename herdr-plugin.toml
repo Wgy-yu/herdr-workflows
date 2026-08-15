@@ -1,6 +1,6 @@
 id = "wgy.herdr-workflows-bridge"
 name = "Herdr Workflows Event Bridge"
-version = "0.3.1"
+version = "0.3.2"
 min_herdr_version = "0.7.0"
 description = "Bridge Codex Agent workflows to authenticated callbacks and Herdr lifecycle events."
 platforms = ["linux", "macos", "windows"]

@@ -235,8 +235,10 @@ callback、返修上限和 Leader 最终裁决。一个仓库同一时刻只允�
    无参数 Herdr Action 的请求信封。任务为空时停止并请求任务正文，不得派发占位任务。
 3. 调用插件 `dispatch` Action。Action 编译不可变契约，拒绝可执行 shell、关闭安全门禁、缺失 callback、
    可写 Reviewer、无界返修、无最终 Leader 裁决、无环失败和未汇合并行分支。
-4. 每个 Agent 只接收短消息以及 `.herdr/workflow/contract.json` 指针。完成后调用插件 `callback`
-   Action，提交 workflow/run/phase/attempt/role/in_reply_to、一次性 token、结构化 payload 和 Markdown 报告。
+4. 每个 Agent 只接收短消息以及契约、请求和 callback 请求路径。桥在派发前原子创建
+   `.herdr/workflow/callbacks/<phase>-attempt-<n>.json`，预填 workflow/run/phase/attempt/role、
+   in_reply_to 和一次性 token；Agent 只补全结构化 payload 与 Markdown 报告，再调用插件
+   `callback` Action。明文 token 不写入状态投影或事件日志，callback 成功后删除请求文件。
 5. `pane.agent_status_changed` 仅唤醒引擎：`working` 是新回合证据，`idle`、`done`、`unknown`
    都不证明阶段完成。没有通过认证的 callback 和报告时，阶段保持原状态。
 6. 引擎按 DAG 下发所有 READY 阶段；并行分支全部 APPROVED 后才释放 join。已确认问题进入有界返修，

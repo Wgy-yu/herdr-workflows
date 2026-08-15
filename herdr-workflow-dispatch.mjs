@@ -1,10 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { findAgentTarget, requestSocket } from "./herdr-event-bridge.mjs";
 import { mergeConfig, parseYamlFile } from "./skills/herdr-workflows/scripts/config-tool.mjs";
 import { compileWorkflowDefinition, loadBuiltInTemplate } from "./workflow-definition.mjs";
-import { applyStoredEvent, readStoredWorkflow, startStoredWorkflow } from "./workflow-store.mjs";
+import { applyStoredEvent, readStoredWorkflow, startStoredWorkflow, writeCallbackRequest } from "./workflow-store.mjs";
 import { createDispatchEnvelope, formatDispatchMessage } from "./workflow-protocol.mjs";
 import { startAgentTurn } from "./herdr-agent-adapter.mjs";
 
@@ -42,8 +42,9 @@ export async function dispatchReadyPhases(root, request, options = {}) {
       outcomes.push({ phaseId, status: "BLOCKED", reason: "AGENT_NOT_FOUND" }); continue;
     }
     const envelope = createDispatchEnvelope(readStoredWorkflow(root), phaseId, contract);
+    const callbackRequestFile = writeCallbackRequest(root, envelope);
     const applied = await applyStoredEvent(root, { type: "TURN_DISPATCHED", eventId: envelope.eventId, runId: state.runId, phaseId, attempt: envelope.attempt, role: envelope.role, callbackTokenHash: envelope.callbackTokenHash });
-    if (!applied.accepted) { outcomes.push({ phaseId, status: "BLOCKED", reason: applied.error?.code }); continue; }
+    if (!applied.accepted) { try { unlinkSync(callbackRequestFile); } catch {} outcomes.push({ phaseId, status: "BLOCKED", reason: applied.error?.code }); continue; }
     const delivery = await startAgentTurn({ target, text: formatDispatchMessage(envelope), timeoutMs: options.timeoutMs }, request);
     if (delivery.status === "TURN_STARTED") await applyStoredEvent(root, { type: "TURN_STARTED", eventId: `started-${envelope.eventId}`, runId: state.runId, phaseId, attempt: envelope.attempt, role: envelope.role, inReplyTo: envelope.eventId });
     else if (delivery.status === "BLOCKED") await applyStoredEvent(root, { type: "PHASE_BLOCKED", eventId: `blocked-${envelope.eventId}`, runId: state.runId, phaseId, attempt: envelope.attempt, role: envelope.role, payload: { reason: delivery.reason } });

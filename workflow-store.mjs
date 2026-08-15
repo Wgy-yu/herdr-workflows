@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createWorkflowState, reduceWorkflow } from "./workflow-engine.mjs";
@@ -81,6 +81,28 @@ export async function startStoredWorkflow(root, contract, mode = "do", options =
 
 export function readStoredWorkflow(root) {
   return json(pathOf(root, "state.json"));
+}
+
+export function writeCallbackRequest(root, envelope) {
+  const callbacks = resolve(pathOf(root, "callbacks"));
+  const file = resolve(callbacks, `${envelope.phaseId}-attempt-${envelope.attempt}.json`);
+  if (!file.startsWith(`${callbacks}${sep}`)) throw new Error("CALLBACK_REQUEST_PATH_ESCAPE");
+  const relativePath = `.herdr/workflow/callbacks/${envelope.phaseId}-attempt-${envelope.attempt}.json`;
+  if (envelope.callbackRequestPath !== relativePath) throw new Error("CALLBACK_REQUEST_PATH_MISMATCH");
+  atomic(file, {
+    workflow_id: envelope.workflowId,
+    run_id: envelope.runId,
+    phase_id: envelope.phaseId,
+    attempt: envelope.attempt,
+    role: envelope.role,
+    in_reply_to: envelope.eventId,
+    type: envelope.callbackType,
+    callback_token: envelope.callbackToken,
+    payload: {},
+    report_markdown: "",
+  });
+  try { chmodSync(file, 0o600); } catch {}
+  return file;
 }
 
 export async function applyStoredEvent(root, event, options = {}) {

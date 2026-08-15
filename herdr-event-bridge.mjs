@@ -26,7 +26,7 @@ export async function handleNativeLifecycleEvent({ projectRoot, event, request }
   if (event.status === "blocked") return applyStoredEvent(projectRoot, { ...base, type: "PHASE_BLOCKED", eventId: event.eventId, payload: { reason: event.reason } });
   const callbackRequired = ["idle", "done"].includes(event.status);
   const audit = await appendStoredAuditEvent(projectRoot, { ...base, type: "LIFECYCLE_OBSERVED", eventId: event.eventId, status: event.status });
-  if (callbackRequired && !audit.duplicate && request && event.target) await request("agent.prompt", { target: event.target, text: `阶段 ${phaseId} 尚缺少认证 callback。请读取 .herdr/workflow/contract.json，并使用当前回合收到的关联字段调用 workflow callback Action。` });
+  if (callbackRequired && !audit.duplicate && request && event.target) await request("agent.prompt", { target: event.target, text: `阶段 ${phaseId} 尚缺少认证 callback。callback_request_path=.herdr/workflow/callbacks/${phaseId}-attempt-${phase.attempt}.json；该文件已保存本轮关联凭证，请补全 payload 和 report_markdown 后调用 workflow callback Action。` });
   return { handled: true, semanticTransition: false, callbackRequired, notified: callbackRequired && !audit.duplicate && Boolean(request && event.target) };
 }
 function findRoot(start) { let current = resolve(start); while (true) { if (existsSync(join(current, ".herdr", "workflow", "state.json"))) return current; const parent = dirname(current); if (parent === current) return null; current = parent; } }

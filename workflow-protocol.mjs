@@ -54,6 +54,6 @@ export function formatDispatchMessage(envelope) {
     `contract_path=${envelope.contractPath}`,
     `request_path=${envelope.requestPath}`,
     `callback_request_path=${envelope.callbackRequestPath}`,
-    "将结构化字段、payload 和 report_markdown 写入 callback_request_path，然后执行：herdr plugin action invoke wgy.herdr-workflows-bridge.callback",
+    "callback_request_path 已预填认证关联字段；补全 payload 和 report_markdown 后执行：herdr plugin action invoke wgy.herdr-workflows-bridge.callback",
   ].join("\n");
 }
