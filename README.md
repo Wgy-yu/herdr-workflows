@@ -297,4 +297,4 @@ node skills/herdr-workflows/scripts/config-tool.mjs merge `
 ```
 
 如果桥接没有通知 Agent，先确认：项目配置三类角色已绑定、角色名称与 Herdr Agent 名称一致、
-Herdr 版本满足要求，并检查 `workflow-events.jsonl` 和插件日志。
+Herdr 版本满足要求，并检查 `.herdr/workflow/events.jsonl` 和插件日志。

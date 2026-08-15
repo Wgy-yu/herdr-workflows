@@ -53,3 +53,16 @@ test("concurrent duplicate events append and advance exactly once", async () => 
     assert.equal(replayWorkflow(root).sequence, 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("crash injection preserves ordered recovery semantics", async () => {
+  const root = mkdtempSync(join(tmpdir(), "herdr-store-crash-"));
+  try {
+    const state = await startStoredWorkflow(root, contract());
+    const event = { type: "TURN_DISPATCHED", eventId: "crash-event", runId: state.runId, phaseId: "design", attempt: 1, role: "leader" };
+    await assert.rejects(applyStoredEvent(root, event, { failAt: "before-append" }), /INJECTED_BEFORE_APPEND/);
+    assert.equal(replayWorkflow(root).sequence, 1);
+    await assert.rejects(applyStoredEvent(root, event, { failAt: "after-append" }), /INJECTED_AFTER_APPEND/);
+    assert.throws(() => replayWorkflow(root), /STATE_PROJECTION_MISMATCH/);
+    assert.equal(repairWorkflow(root).sequence, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

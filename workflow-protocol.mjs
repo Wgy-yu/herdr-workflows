@@ -29,6 +29,15 @@ export function validateCallbackEnvelope(envelope, state, contract) {
   if (envelope.type !== definition.callback.type && !(definition.kind === "decision" && envelope.type === "FINAL_DECISION")) return { valid: false, error: "CALLBACK_TYPE_INVALID" };
   const actual = hashCallbackToken(envelope.callback_token ?? "");
   if (!equalHash(actual, phase.callbackTokenHash)) return { valid: false, error: "CALLBACK_TOKEN_INVALID" };
+  const payload = envelope.payload && typeof envelope.payload === "object" ? envelope.payload : {};
+  if (definition.callback.requiredFields.some((field) => !(field in payload))) return { valid: false, error: "CALLBACK_FIELDS_MISSING" };
+  const changed = Array.isArray(payload.changed_files) ? payload.changed_files.map((path) => path.replaceAll("\\", "/")) : [];
+  if (["review", "verification"].includes(definition.kind) && changed.length > 0) return { valid: false, error: "REVIEWER_WRITE_FORBIDDEN" };
+  if (definition.kind === "implementation") {
+    const scopes = contract.roles[definition.role].writablePaths;
+    const within = (path, pattern) => { const prefix = pattern.split(/[*!?[\]]/, 1)[0]; return path === prefix.replace(/\/$/, "") || path.startsWith(prefix); };
+    if (changed.some((path) => path.startsWith("/") || /^[A-Za-z]:\//.test(path) || path.split("/").includes("..") || !scopes.some((scope) => within(path, scope)))) return { valid: false, error: "WRITE_SCOPE_VIOLATION" };
+  }
   return { valid: true, callbackTokenHash: actual };
 }
 

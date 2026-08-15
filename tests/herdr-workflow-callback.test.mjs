@@ -16,7 +16,7 @@ test("callback stores report and advances only after authenticated correlation",
     const dispatch = createDispatchEnvelope(state, "design", contract);
     await applyStoredEvent(root, { type: "TURN_DISPATCHED", eventId: dispatch.eventId, runId: state.runId, phaseId: "design", attempt: 1, role: "leader", callbackTokenHash: dispatch.callbackTokenHash });
     state = readStoredWorkflow(root);
-    const base = { projectRoot: root, workflow_id: state.workflowId, run_id: state.runId, phase_id: "design", event_id: "callback-1", attempt: 1, role: "leader", in_reply_to: dispatch.eventId, type: contract.phases.design.callback.type, report_markdown: "# report", payload: { accepted: true } };
+    const base = { projectRoot: root, workflow_id: state.workflowId, run_id: state.runId, phase_id: "design", event_id: "callback-1", attempt: 1, role: "leader", in_reply_to: dispatch.eventId, type: contract.phases.design.callback.type, report_markdown: "# report", payload: { plan_path: ".herdr/plan.md", accepted: true } };
     assert.equal((await handleCallback({ ...base, callback_token: "wrong" })).ok, false);
     assert.equal(readStoredWorkflow(root).phases.design.status, "DISPATCHED");
     assert.match(readFileSync(join(root, ".herdr", "workflow", "events.jsonl"), "utf8"), /CALLBACK_REJECTED/);

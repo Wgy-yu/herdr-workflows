@@ -155,7 +155,7 @@ export function reduceWorkflow(current, event, contract) {
         state.status = "WAITING_FOR_JOIN";
       }
     }
-  } else if (event.type === "FINAL_DECISION") {
+  } else if (event.type === "FINAL_DECISION" || (definition.kind === "decision" && event.type === definition.callback.type)) {
     if (event.phaseId !== contract.finalPhaseId || !["RUNNING", "DISPATCHED"].includes(phase.status) || event.inReplyTo !== phase.dispatchedEventId) return reject(current, "FINAL_DECISION_INVALID");
     if (!["pass", "approved", "reject"].includes(event.payload?.decision)) return reject(current, "FINAL_DECISION_INVALID");
     phase.status = "APPROVED";

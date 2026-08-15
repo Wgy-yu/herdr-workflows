@@ -1,8 +1,8 @@
 id = "wgy.herdr-workflows-bridge"
-name = "Herdr Workflows Event Bridge"
+name = "Herdr Native Workflow Engine"
 version = "0.3.0"
 min_herdr_version = "0.7.0"
-description = "Route Herdr agent completion and blocked events directly between configured workflow roles."
+description = "Run single-active template or custom DAG workflows through authenticated callbacks and Herdr lifecycle events."
 platforms = ["linux", "macos", "windows"]
 
 [[events]]
@@ -11,7 +11,7 @@ command = ["node", "herdr-event-bridge.mjs"]
 
 [[actions]]
 id = "dispatch"
-title = "Dispatch workflow plan"
+title = "Start native workflow"
 contexts = ["workspace"]
 command = ["node", "herdr-workflow-dispatch.mjs"]
 

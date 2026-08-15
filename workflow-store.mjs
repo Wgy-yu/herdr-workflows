@@ -81,15 +81,17 @@ export function readStoredWorkflow(root) {
   return json(pathOf(root, "state.json"));
 }
 
-export async function applyStoredEvent(root, event) {
+export async function applyStoredEvent(root, event, options = {}) {
   return withWorkflowLock(root, async () => {
     const contract = json(pathOf(root, "contract.json"));
     const current = readStoredWorkflow(root);
     const result = reduceWorkflow(current, event, contract);
     if (!result.accepted) return result;
     const sequence = current.sequence + 1;
+    if (options.failAt === "before-append") throw new Error("INJECTED_BEFORE_APPEND");
     result.state.sequence = sequence;
     appendFileSync(pathOf(root, "events.jsonl"), `${JSON.stringify({ sequence, event })}\n`, "utf8");
+    if (options.failAt === "after-append") throw new Error("INJECTED_AFTER_APPEND");
     writeProjections(root, result.state);
     return result;
   }, "apply-event");
@@ -108,6 +110,10 @@ export async function writeStageReport(root, envelope, markdown) {
   const file = resolve(pathOf(root, "reports", name));
   const reports = resolve(pathOf(root, "reports"));
   if (!file.startsWith(`${reports}${sep}`)) throw new Error("REPORT_PATH_ESCAPE");
+  mkdirSync(reports, { recursive: true });
+  const realStore = realpathSync(pathOf(root));
+  const realReports = realpathSync(reports);
+  if (realReports !== realStore && !realReports.startsWith(`${realStore}${sep}`)) throw new Error("REPORT_PATH_ESCAPE");
   if (existsSync(file)) throw new Error("REPORT_IMMUTABLE");
   atomic(file, markdown);
   return file;

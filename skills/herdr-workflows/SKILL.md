@@ -60,27 +60,13 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
   远程 Shell。命令、目标和等待范围必须由用户任务授权，涉及安装、删除、覆盖、外部服务
   或秘密时仍按权限门禁处理。
 
-## Herdr 事件桥接（mode=do 强制门禁）
+## Herdr 原生事件桥接（do/goal 共用）
 
-- 插件根目录的 `herdr-plugin.toml` 是官方 Herdr 外置插件清单；它只注册
-  `pane.agent_status_changed` 事件，不修改官方 Herdr 代码。
-- `mode=do` 启动前必须确认该插件已注册；用
-  `herdr plugin list --plugin wgy.herdr-workflows-bridge` 检查，缺失、manifest warning
-  或版本不满足时立即停止并输出 `EVENT_BRIDGE_REQUIRED`，不得进入实施。
-- 注册后，Herdr 在 Agent 状态变为 `done` 或 `blocked` 时启动
-  `herdr-event-bridge.mjs`。桥接读取项目 `.herdr/workflows.yaml`，通过官方 Socket API
-  的 `agent.list` 找到配置角色，再用 `agent.prompt` 直接通知目标 Agent：实施者完成后直达
-  审查者，审查者完成后直达 Leader，任一角色阻塞时直达 Leader。
-- 通知正文只包含状态、角色、pane/workspace、共享计划路径、审核结果路径和共享事件记录路径，
-  禁止内联计划或审核正文。`mode=do` 的审查者把完整结论写入
-  `<repo>/.herdr/reviews/<runId>.md`；文件缺失或为空时保持 `REVIEW_RUNNING` 并短消息唤回
-  审查者，只有文件有效后才通知 Leader。
-  事件会追加到 `<repo>/.herdr/workflow-events.jsonl`，带 Herdr 状态序号的重复事件不会重复
-  通知。目标 Agent 暂时不可用时，桥接退回官方 `notification.show`，不会让 Leader 充当中继。
-- 该桥接只处理已明确配置三类角色的项目；角色未配置、项目配置不存在或事件不是可路由状态时
-  安全跳过并留下 Herdr 插件日志，不伪造完成结论。桥接不是建议项，而是 `mode=do` 的
-  完成推进唯一来源。
-
+- `herdr-plugin.toml` 注册 `dispatch`、`callback`、`repair` Actions 和 `pane.agent_status_changed`。
+- 运行前用 `herdr plugin list --plugin wgy.herdr-workflows-bridge` 确认无 manifest warning。
+- 生命周期事件只写入 `.herdr/workflow/events.jsonl` 审计并唤醒引擎；语义推进只接受认证 callback。
+- 插件通过官方 Socket API 定位当前工作区 Agent。消息只包含关联元数据和契约路径。
+- 插件缺失、版本不满足或角色未绑定时停止启动，不以轮询或 Leader 转述代替。
 ## 配置模型（mode=config / mode=workflow 及所有 mode 共用）
 
 两层配置 + 插件默认值，优先级从高到低：
