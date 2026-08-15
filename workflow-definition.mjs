@@ -20,6 +20,21 @@ function hasDuplicate(values) {
   return new Set(values).size !== values.length;
 }
 
+function normalizeWritablePath(path) {
+  return path.replaceAll("\\", "/").replace(/\/{2,}/g, "/");
+}
+
+function writablePathError(path) {
+  const slashPath = path.replaceAll("\\", "/");
+  if (slashPath.startsWith("/") || /^[A-Za-z]:\//.test(slashPath)) {
+    return "writable_paths 不得使用绝对路径";
+  }
+  if (slashPath.split("/").includes("..")) {
+    return "writable_paths 不得包含 .. 路径段";
+  }
+  return null;
+}
+
 function walkForExecutionFields(value, path, errors) {
   if (Array.isArray(value)) {
     value.forEach((item, index) => walkForExecutionFields(item, `${path}[${index}]`, errors));
@@ -84,6 +99,36 @@ function findCycle(phaseById) {
   return [...phaseById.keys()].some(visit);
 }
 
+function findDecisionReachabilityErrors(phases, decision) {
+  const successors = new Map(
+    phases.filter(isRecord).filter((phase) => isNonEmptyString(phase.id)).map((phase) => [phase.id, []])
+  );
+  for (const phase of phases) {
+    if (!isRecord(phase) || !isNonEmptyString(phase.id) || !Array.isArray(phase.needs)) continue;
+    for (const dependency of phase.needs) {
+      successors.get(dependency)?.push(phase.id);
+    }
+  }
+  const errors = [];
+  const sinks = [...successors.entries()].filter(([, next]) => next.length === 0).map(([id]) => id);
+  if (sinks.length !== 1 || sinks[0] !== decision.id) {
+    errors.push("decision 必须是唯一 sink 阶段");
+  }
+  const reachable = new Set([decision.id]);
+  const pending = [...decision.needs];
+  while (pending.length > 0) {
+    const phaseId = pending.pop();
+    if (reachable.has(phaseId)) continue;
+    reachable.add(phaseId);
+    const phase = phases.find((candidate) => isRecord(candidate) && candidate.id === phaseId);
+    if (Array.isArray(phase?.needs)) pending.push(...phase.needs);
+  }
+  for (const phaseId of successors.keys()) {
+    if (!reachable.has(phaseId)) errors.push(`phase 无法到达 decision，phase=${phaseId}`);
+  }
+  return errors;
+}
+
 /**
  * Validate a declarative workflow definition. The returned errors are suitable
  * for displaying before a single shared do/goal contract is allowed to start.
@@ -113,6 +158,11 @@ export function validateWorkflowDefinition(definition) {
       if (!isNonEmptyString(role.kind)) errors.push(`角色缺少 kind，role=${roleId}`);
       if (!Array.isArray(role.writable_paths) || role.writable_paths.some((path) => !isNonEmptyString(path))) {
         errors.push(`writable_paths 必须是字符串数组，role=${roleId}`);
+      } else {
+        for (const path of role.writable_paths) {
+          const pathError = writablePathError(path);
+          if (pathError) errors.push(`${pathError}，role=${roleId}，path=${path}`);
+        }
       }
       if (role.kind === "reviewer" && role.read_only !== true) {
         errors.push(`Reviewer 必须只读，role=${roleId}`);
@@ -157,6 +207,15 @@ export function validateWorkflowDefinition(definition) {
     if (phase.kind === "implementation" && (!Array.isArray(phase.required_tests) || phase.required_tests.length === 0 || phase.required_tests.some((test) => !isNonEmptyString(test)))) {
       errors.push(`实施阶段必须声明非空 required_tests，phase=${phaseId}`);
     }
+    if (phase.kind === "implementation" && (!Array.isArray(roles?.[phase.role]?.writable_paths) || roles[phase.role].writable_paths.length === 0)) {
+      errors.push(`实施阶段角色必须拥有非空 writable_paths，phase=${phaseId}`);
+    }
+    if (phase.kind === "review" || phase.kind === "verification") {
+      const role = roles?.[phase.role];
+      if (role?.kind !== "reviewer" || role.read_only !== true || !Array.isArray(role.writable_paths) || role.writable_paths.length > 0) {
+        errors.push(`review 或 verification 阶段必须绑定只读 Reviewer，phase=${phaseId}`);
+      }
+    }
     if (!isRecord(phase.callback) || !isNonEmptyString(phase.callback.type) || !Array.isArray(phase.callback.required_fields) || phase.callback.required_fields.length === 0 || phase.callback.required_fields.some((field) => !isNonEmptyString(field))) {
       errors.push(`phase 必须声明结构化 callback，phase=${phaseId}`);
     }
@@ -167,8 +226,8 @@ export function validateWorkflowDefinition(definition) {
   if (isRecord(roles)) {
     for (const [first, second] of phasePairsThatRunInParallel(phases.filter(isRecord))) {
       if (first.role === second.role) continue;
-      const firstPaths = roles[first.role]?.writable_paths;
-      const secondPaths = roles[second.role]?.writable_paths;
+      const firstPaths = roles[first.role]?.writable_paths?.map(normalizeWritablePath);
+      const secondPaths = roles[second.role]?.writable_paths?.map(normalizeWritablePath);
       if (!Array.isArray(firstPaths) || !Array.isArray(secondPaths)) continue;
       if (firstPaths.some((firstPath) => secondPaths.some((secondPath) => patternsOverlap(firstPath, secondPath)))) {
         errors.push(`并行写路径重叠，roles=${first.role},${second.role}`);
@@ -185,6 +244,7 @@ export function validateWorkflowDefinition(definition) {
     if (decision.role !== "leader" || decision.protected !== true || hasSuccessor) {
       errors.push("最终 decision 必须是受保护的 Leader 终止阶段");
     }
+    errors.push(...findDecisionReachabilityErrors(phases, decision));
   }
   return errors;
 }
@@ -197,7 +257,7 @@ export function compileWorkflowDefinition(definition, overrides = {}) {
     agent: agentOverrides[roleId] ?? role.agent ?? null,
     kind: role.kind,
     readOnly: role.read_only === true,
-    writablePaths: [...role.writable_paths],
+    writablePaths: role.writable_paths.map(normalizeWritablePath),
   }]));
   const phases = Object.fromEntries(definition.phases.map((phase) => [phase.id, {
     role: phase.role,

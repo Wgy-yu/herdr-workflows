@@ -39,6 +39,57 @@ test("all built-in templates end at a protected Leader decision", () => {
   }
 });
 
+test("every phase must converge on the sole decision sink", () => {
+  const definition = loadBuiltInTemplate("development");
+  definition.phases.push({
+    id: "unmerged_branch",
+    role: "leader",
+    kind: "design",
+    needs: ["design"],
+    callback: { type: "plan", required_fields: ["plan_path"] },
+  });
+  assert.throws(() => compileWorkflowDefinition(definition), /唯一 sink|无法到达 decision/);
+});
+
+test("write paths normalize separators and reject absolute or traversal paths", () => {
+  const normalized = loadBuiltInTemplate("frontend-backend");
+  normalized.roles.frontend.writable_paths = ["src\\frontend\\**"];
+  assert.deepEqual(
+    compileWorkflowDefinition(normalized).roles.frontend.writablePaths,
+    ["src/frontend/**"]
+  );
+
+  const absolute = loadBuiltInTemplate("frontend-backend");
+  absolute.roles.frontend.writable_paths = ["C:\\workspace\\src\\frontend\\**"];
+  assert.throws(() => compileWorkflowDefinition(absolute), /绝对路径/);
+
+  const traversal = loadBuiltInTemplate("frontend-backend");
+  traversal.roles.frontend.writable_paths = ["src\\frontend\\..\\shared\\**"];
+  assert.throws(() => compileWorkflowDefinition(traversal), /\.\./);
+
+  const overlapping = loadBuiltInTemplate("frontend-backend");
+  overlapping.roles.frontend.writable_paths = ["src\\shared\\**"];
+  overlapping.roles.backend.writable_paths = ["src/shared/**"];
+  assert.throws(() => compileWorkflowDefinition(overlapping), /并行写路径重叠/);
+});
+
+test("implementation phases require a role with writable paths", () => {
+  const definition = loadBuiltInTemplate("development");
+  definition.roles.implementer.writable_paths = [];
+  assert.throws(() => compileWorkflowDefinition(definition), /实施阶段角色必须拥有非空 writable_paths/);
+});
+
+test("review and verification phases require a read-only reviewer role", () => {
+  for (const phaseId of ["review", "verify"]) {
+    const definition = loadBuiltInTemplate("development");
+    definition.phases.find((phase) => phase.id === phaseId).role = "implementer";
+    assert.throws(
+      () => compileWorkflowDefinition(definition),
+      /review 或 verification 阶段必须绑定只读 Reviewer/
+    );
+  }
+});
+
 test("validator rejects unsafe and non-deterministic workflow definitions", () => {
   const definition = loadBuiltInTemplate("development");
   definition.max_rework = 6;
