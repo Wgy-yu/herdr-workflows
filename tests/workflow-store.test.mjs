@@ -38,6 +38,7 @@ test("reports are bounded and immutable", async () => {
     await startStoredWorkflow(root, contract());
     const envelope = { phaseId: "design", attempt: 1 };
     await writeStageReport(root, envelope, "ok");
+    assert.match(await writeStageReport(root, envelope, "ok"), /design-attempt-1\.md$/);
     await assert.rejects(writeStageReport(root, envelope, "again"), /REPORT_IMMUTABLE/);
     await assert.rejects(writeStageReport(root, { phaseId: "../escape", attempt: 1 }, "x"), /REPORT_PATH_ESCAPE/);
   } finally { rmSync(root, { recursive: true, force: true }); }

@@ -37,7 +37,10 @@ export async function dispatchReadyPhases(root, request, options = {}) {
   for (const phaseId of Object.keys(state.phases).filter((id) => state.phases[id].status === "READY")) {
     const roleId = contract.phases[phaseId].role;
     const target = findAgentTarget(agents, contract.roles[roleId].agent, options.workspaceId);
-    if (!target) { outcomes.push({ phaseId, status: "BLOCKED", reason: "AGENT_NOT_FOUND" }); continue; }
+    if (!target) {
+      await applyStoredEvent(root, { type: "DISPATCH_FAILED", eventId: `dispatch-failed-${phaseId}-${state.runId}`, runId: state.runId, phaseId, attempt: state.phases[phaseId].attempt, role: roleId, payload: { reason: "AGENT_NOT_FOUND" } });
+      outcomes.push({ phaseId, status: "BLOCKED", reason: "AGENT_NOT_FOUND" }); continue;
+    }
     const envelope = createDispatchEnvelope(readStoredWorkflow(root), phaseId, contract);
     const applied = await applyStoredEvent(root, { type: "TURN_DISPATCHED", eventId: envelope.eventId, runId: state.runId, phaseId, attempt: envelope.attempt, role: envelope.role, callbackTokenHash: envelope.callbackTokenHash });
     if (!applied.accepted) { outcomes.push({ phaseId, status: "BLOCKED", reason: applied.error?.code }); continue; }

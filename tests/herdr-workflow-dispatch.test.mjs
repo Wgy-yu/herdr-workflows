@@ -15,3 +15,7 @@ test("native dispatch persists dispatch before bounded delivery", async () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 test("Action context prefers workspace cwd", () => { assert.equal(contextStartPath({ workspace_cwd: "C:/repo", focused_pane_cwd: "C:/other" }), "C:/repo"); });
+test("missing Agent persists an explicitly blocked branch", async () => {
+  const root = mkdtempSync(join(tmpdir(), "herdr-dispatch-blocked-"));
+  try { const result = await startNativeWorkflow({ projectRoot: root, template: "review-only", agents: {}, workspaceId: "w1", request: async () => ({ result: { agents: [] } }) }); assert.equal(result.state.status, "BLOCKED"); assert.equal(result.state.phases.review.status, "BLOCKED"); } finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -102,6 +102,12 @@ export function reduceWorkflow(current, event, contract) {
     phase.status = "DISPATCHED";
     phase.dispatchedEventId = event.eventId;
     phase.callbackTokenHash = event.callbackTokenHash ?? null;
+  } else if (event.type === "DISPATCH_FAILED") {
+    if (phase.status !== "READY") return reject(current, "PHASE_NOT_READY");
+    phase.status = "BLOCKED";
+    state.processedEventIds.push(event.eventId);
+    state.lastEventId = event.eventId;
+    return block(state, "DISPATCH_FAILED", event.payload?.reason);
   } else if (event.type === "TURN_STARTED") {
     if (phase.status !== "DISPATCHED" || event.inReplyTo !== phase.dispatchedEventId) return reject(current, "CAUSATION_INVALID");
     phase.status = "RUNNING";

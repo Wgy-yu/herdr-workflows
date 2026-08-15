@@ -36,7 +36,8 @@ export async function withWorkflowLock(root, operation, name = "mutation") {
       writeFileSync(descriptor, JSON.stringify({ pid: process.pid, token, operation: name, acquiredAt: new Date().toISOString() }), "utf8");
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      const snapshot = readFileSync(file, "utf8");
+      let snapshot;
+      try { snapshot = readFileSync(file, "utf8"); } catch (readError) { if (readError.code === "ENOENT") continue; throw readError; }
       if (lockExpired(file, snapshot)) { try { unlinkSync(file); } catch {} continue; }
       if (Date.now() >= deadline) throw new Error("WORKFLOW_LOCK_TIMEOUT");
       await new Promise((done) => setTimeout(done, 10));
@@ -64,7 +65,7 @@ export async function startStoredWorkflow(root, contract, mode = "do") {
   return withWorkflowLock(root, async () => {
     assertStorePath(root);
     const stateFile = pathOf(root, "state.json");
-    if (existsSync(stateFile) && !["COMPLETED", "REJECTED", "BLOCKED"].includes(json(stateFile).status)) throw new Error("WORKFLOW_ALREADY_ACTIVE");
+    if (existsSync(stateFile) && !["COMPLETED", "REJECTED"].includes(json(stateFile).status)) throw new Error("WORKFLOW_ALREADY_ACTIVE");
     const state = createWorkflowState(contract, mode);
     mkdirSync(pathOf(root), { recursive: true });
     atomic(pathOf(root, "contract.json"), contract);
@@ -114,7 +115,10 @@ export async function writeStageReport(root, envelope, markdown) {
   const realStore = realpathSync(pathOf(root));
   const realReports = realpathSync(reports);
   if (realReports !== realStore && !realReports.startsWith(`${realStore}${sep}`)) throw new Error("REPORT_PATH_ESCAPE");
-  if (existsSync(file)) throw new Error("REPORT_IMMUTABLE");
+  if (existsSync(file)) {
+    if (readFileSync(file, "utf8") === markdown) return file;
+    throw new Error("REPORT_IMMUTABLE");
+  }
   atomic(file, markdown);
   return file;
 }
