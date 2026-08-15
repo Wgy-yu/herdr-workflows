@@ -172,6 +172,7 @@ herdr agent list
 | `$herdr-workflows:workflow` | 配置项目角色、步骤、Superpowers 开关和角色轮换 |
 | `$herdr-workflows:review` | 创建共享 Markdown 评审单并执行只读审查 |
 | `$herdr-workflows:do` | 执行设计、计划、实施、审查、返修和最终裁决闭环 |
+| `$herdr-workflows:goal` | 在 Agent Goal 中使用 wait 模式执行完整开发闭环 |
 
 推荐首次使用：
 
@@ -226,7 +227,17 @@ role_rotation:
 
 该字段固定为 `true`，不能关闭。`$herdr-workflows:do` 启动前必须确认
 `wgy.herdr-workflows-bridge` 已注册；否则输出 `EVENT_BRIDGE_REQUIRED` 并停止，不会退回
-`agent.wait`、`agent.prompt --wait` 或终端轮询。
+`agent.wait`、`agent.prompt --wait` 或终端轮询。该门禁不约束 `$herdr-workflows:goal`。
+
+## Goal 等待模式
+
+`mode=goal` 用于 Leader 由 Agent Goal 管理生命周期的场景。它不调用事件桥 `dispatch`
+Action，也不依赖 `.herdr/workflow-state.json`；Leader 使用
+`agent.prompt --wait --timeout` 下发并等待实施、审核和返修阶段。等待超时时先读取 Agent
+状态与最近输出，任务仍在运行则用 `agent.wait` 继续等待同一任务，不重复派发。
+
+因此两种开发入口互斥：`do` 只由官方状态事件推进，`goal` 只由当前 Goal 内的官方等待
+原语推进。两者共享 Reviewer 只读、返修上限和 Leader 最终裁决规则。
 
 ## 事件桥接行为
 

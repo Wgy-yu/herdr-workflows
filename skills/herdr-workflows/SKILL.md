@@ -1,12 +1,12 @@
 ---
 name: herdr-workflows
-description: 通过外置 Herdr Workflows 插件配置并运行可移植的多智能体工作流，覆盖本机 Agent 检查、首次初始化、两层配置管理、共享 Markdown 评审与开发实施闭环；六个薄 Skill（$herdr-workflows:init、$herdr-workflows:check、$herdr-workflows:config、$herdr-workflows:workflow、$herdr-workflows:review、$herdr-workflows:do）共享本事实源。
+description: 通过外置 Herdr Workflows 插件配置并运行可移植的多智能体工作流，覆盖本机 Agent 检查、首次初始化、两层配置管理、共享 Markdown 评审，以及事件驱动或 Goal 等待式开发实施闭环；七个薄 Skill 共享本事实源。
 ---
 
 # herdr-workflows
 
 通过 Herdr 检查、配置、审查和运行多 Agent 工作流。本 Skill 是唯一工作流事实源：
-五个薄 Skill 只声明入口语义并指向本 Skill；角色解析、门禁、初始化、通信、审查、
+七个薄 Skill 只声明入口语义并指向本 Skill；角色解析、门禁、初始化、通信、审查、
 返修和最终验收的规则只在这里维护，不得复制进入口 Skill。
 
 ## 入口与 mode
@@ -17,6 +17,7 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
 - `mode=workflow`：配置项目工作流。
 - `mode=review`：启动源码只读、评审单可追加的多 Agent 审查。
 - `mode=do`：启动多 Agent 开发实施闭环。
+- `mode=goal`：启动适配 Agent Goal 的等待式开发实施闭环。
 
 用户随入口 Skill 提供的其余文本是当前 mode 的运行时参数（例如 `mode=workflow`
 时的目标工作流名、`mode=config` 时的目标 Agent 标识），优先级高于配置文件和默认值。
@@ -28,9 +29,9 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
   Leader，不伪造门禁通过。
 - Herdr 能力以 `herdr --skill` 输出为事实源。窗格、消息和 Agent 检测复用 Herdr
   已提供的能力，不自行实现，不凭记忆假设子命令与参数。`mode=do` 的完成推进只能由
-  外置事件桥触发，不得把等待 API 当作流程控制器。
+  Herdr 官方状态事件触发；`mode=goal` 的完成推进只能由当前 Leader 回合使用等待 API 控制。
 
-## 公共工作流初始化（mode=review / mode=do 共用）
+## 公共工作流初始化（mode=review / mode=do / mode=goal 共用）
 
 1. 盘点：读取 Herdr 当前状态（窗格、标签页、Agent、工作目录）。
 2. 补齐：只补齐缺失的窗格与 Agent。Agent 命令不存在时报告未安装，不创建窗格启动。
@@ -48,9 +49,10 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
 
 ## Agent 直连与命令调用
 
-- Agent 间高层通信使用 Herdr 的 `agent.prompt`，只负责无等待地下发消息；禁止使用
-  `--wait`、`agent.wait` 或等待回执来推进 `mode=do`。输出读取使用 `agent.read`，仅可
-  在用户要求诊断时单次读取。Leader 不代为转述。
+- `mode=do` 的高层通信使用无等待的 `agent.prompt`；禁止使用 `--wait`、`agent.wait`
+  或等待回执推进。`mode=goal` 使用 `agent.prompt <目标> <内容> --wait --timeout <毫秒>`
+  下发并等待当前阶段；超时后先用 `agent.get` 和 `agent.read` 诊断，同一任务仍在运行时
+  使用 `agent.wait <目标>` 继续等待，不重复下发。Leader 不代为转述长篇正文。
 - 如用户明确授权目标 Agent 在自己的终端执行命令，可使用 `agent.send_keys` 或
   `pane.send_text` 将命令输入目标窗格，再用 `agent.read`/`pane.read` 获取结果；先用
   `herdr --skill` 或 `herdr api schema --json` 确认当前参数，不猜测 CLI 参数。
@@ -261,6 +263,28 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
    `maxSwitches` 用于限制本轮轮换次数。轮换不改变 Reviewer 只读门禁。
 11. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
 
+## mode=goal：Agent Goal 等待式开发实施闭环
+
+输入和写入授权与 `mode=do` 相同。该模式适用于当前 Leader 由 Agent Goal 管理生命周期、
+需要在同一 Goal 内等待各阶段完成的场景。
+
+1. 解析工作流并完成公共初始化和通信验收。`event_bridge_required` 与事件桥注册状态不构成
+   本模式门禁；mode=goal 不调用插件 `dispatch` Action，也不读取、创建或迁移
+   `.herdr/workflow-state.json`。
+2. 完成设计确认并生成可执行计划，将长篇计划写入共享 Markdown 文件。
+3. Leader 使用 `herdr agent prompt <实施者> <短任务说明与计划路径> --wait --timeout <毫秒>`
+   下发实施任务并等待。调用正常返回后读取实施回复，独立核对 diff 与测试证据。
+4. 等待超时时，先调用 `agent.get` 判断生命周期并用 `agent.read` 读取最近输出：仍在工作时
+   对同一任务调用 `herdr agent wait <实施者>`；已阻塞时处理阻塞；状态未知时检查集成。
+   不得因超时重复发送实施任务。
+5. 实施完成后，以同样的 `agent.prompt ... --wait --timeout` 方式要求审核者只读审查。
+   审核者把完整结论写入共享审核文件；Leader 读取文件并验证审查意见。
+6. 已确认问题按相同等待方式交回实施者返修，再等待审核者复审。达到 `max_rework` 上限后
+   由 `takeover_on_exceed` 指定的接管者处理。
+7. 审核者通过后，Leader 独立运行项目检查并作最终裁决。只有 Leader 可输出最终通过。
+8. Goal 模式的当前回合持续到最终裁决或明确外部阻塞；不输出“等待事件自动唤醒”，不依赖
+   `pane.agent_status_changed` 续跑，也不使用终端轮询代替 Herdr 官方等待原语。
+
 ## 权限和安全边界
 
 最大权限启动参数（`elevated_args`）只消除普通本地权限提示。以下操作不能因最大权限
@@ -288,6 +312,8 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 - Agent 状态为 unknown、超时或阻塞：读取状态和最近输出后处理，不重复盲发提示。
 - `mode=do` 未注册事件桥或 `event_bridge_required` 不是 `true`：输出 `EVENT_BRIDGE_REQUIRED`
   并停止，不得改用 `agent.wait`、`agent.prompt --wait` 或终端轮询。
+- `mode=goal` 等待超时：读取状态和最近输出后继续等待同一任务或处理阻塞，不切换到事件桥，
+  不重复派发。
 - review 模式出现评审单以外的工作树修改：保留现场并报告，不自动回滚用户或 Agent 变更。
 - Agent 点对点通信不可用或双向冒烟失败：停止工作流，不让 Leader 充当人工消息中继。
 - 角色轮换开启但不足三个不同 Agent 或用户未确认能力差距提示：保持原角色并报告未轮换原因。

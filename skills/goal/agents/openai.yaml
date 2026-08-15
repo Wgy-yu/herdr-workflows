@@ -1,0 +1,6 @@
+interface:
+  display_name: "Herdr Goal"
+  short_description: "在 Agent Goal 中用等待模式运行多 Agent 开发闭环"
+  default_prompt: "Use $goal to run a wait-driven Herdr multi-agent workflow inside an Agent Goal."
+policy:
+  allow_implicit_invocation: true
