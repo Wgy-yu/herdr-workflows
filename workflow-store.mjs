@@ -28,10 +28,12 @@ export async function withWorkflowLock(root, operation, name = "mutation") {
   const file = pathOf(root, "lock.json");
   const deadline = Date.now() + 8_000;
   let descriptor;
+  let token;
   while (descriptor === undefined) {
     try {
       descriptor = openSync(file, "wx");
-      writeFileSync(descriptor, JSON.stringify({ pid: process.pid, token: randomUUID(), operation: name, acquiredAt: new Date().toISOString() }), "utf8");
+      token = randomUUID();
+      writeFileSync(descriptor, JSON.stringify({ pid: process.pid, token, operation: name, acquiredAt: new Date().toISOString() }), "utf8");
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
       const snapshot = readFileSync(file, "utf8");
@@ -40,7 +42,10 @@ export async function withWorkflowLock(root, operation, name = "mutation") {
       await new Promise((done) => setTimeout(done, 10));
     }
   }
-  try { return await operation(); } finally { closeSync(descriptor); try { unlinkSync(file); } catch {} }
+  try { return await operation(); } finally {
+    closeSync(descriptor);
+    try { if (JSON.parse(readFileSync(file, "utf8")).token === token) unlinkSync(file); } catch {}
+  }
 }
 
 function assertStorePath(root) {
@@ -64,10 +69,11 @@ export async function startStoredWorkflow(root, contract, mode = "do") {
     mkdirSync(pathOf(root), { recursive: true });
     atomic(pathOf(root, "contract.json"), contract);
     atomic(pathOf(root, "definition.yaml"), `# compiled workflow: ${contract.template}\n`);
+    state.sequence = 1;
     const created = { sequence: 1, type: "WORKFLOW_CREATED", eventId: randomUUID(), state };
     atomic(pathOf(root, "events.jsonl"), `${JSON.stringify(created)}\n`);
-    writeProjections(root, { ...state, sequence: 1 });
-    return { ...state, sequence: 1 };
+    writeProjections(root, state);
+    return state;
   }, "start");
 }
 
@@ -82,11 +88,18 @@ export async function applyStoredEvent(root, event) {
     const result = reduceWorkflow(current, event, contract);
     if (!result.accepted) return result;
     const sequence = current.sequence + 1;
-    appendFileSync(pathOf(root, "events.jsonl"), `${JSON.stringify({ sequence, event, state: result.state })}\n`, "utf8");
     result.state.sequence = sequence;
+    appendFileSync(pathOf(root, "events.jsonl"), `${JSON.stringify({ sequence, event })}\n`, "utf8");
     writeProjections(root, result.state);
     return result;
   }, "apply-event");
+}
+
+export async function appendStoredAuditEvent(root, event) {
+  return withWorkflowLock(root, async () => {
+    appendFileSync(pathOf(root, "events.jsonl"), `${JSON.stringify({ audit: true, at: new Date().toISOString(), event })}\n`, "utf8");
+    return event;
+  }, "audit-event");
 }
 
 export async function writeStageReport(root, envelope, markdown) {
@@ -100,18 +113,29 @@ export async function writeStageReport(root, envelope, markdown) {
   return file;
 }
 
-export function replayWorkflow(root) {
+function replayEvents(root) {
   const records = readFileSync(pathOf(root, "events.jsonl"), "utf8").trim().split(/\r?\n/).filter(Boolean).map(JSON.parse);
   if (!records.length || records[0].type !== "WORKFLOW_CREATED") throw new Error("EVENT_LOG_INVALID");
-  const replayed = records.at(-1).state;
+  const contract = json(pathOf(root, "contract.json"));
+  let replayed = structuredClone(records[0].state);
+  for (const record of records.slice(1).filter((record) => !record.audit)) {
+    if (!record.event || record.sequence !== replayed.sequence + 1) throw new Error("EVENT_LOG_INVALID");
+    const result = reduceWorkflow(replayed, record.event, contract);
+    if (!result.accepted) throw new Error(`EVENT_REPLAY_REJECTED:${result.error?.code ?? "UNKNOWN"}`);
+    replayed = result.state;
+    replayed.sequence = record.sequence;
+  }
+  return replayed;
+}
+
+export function replayWorkflow(root) {
+  const replayed = replayEvents(root);
   if (JSON.stringify(replayed) !== JSON.stringify(readStoredWorkflow(root))) throw new Error("STATE_PROJECTION_MISMATCH");
   return replayed;
 }
 
 export function repairWorkflow(root) {
-  const records = readFileSync(pathOf(root, "events.jsonl"), "utf8").trim().split(/\r?\n/).filter(Boolean).map(JSON.parse);
-  const state = records.at(-1)?.state;
-  if (!state) throw new Error("EVENT_LOG_INVALID");
+  const state = replayEvents(root);
   writeProjections(root, state);
   return state;
 }

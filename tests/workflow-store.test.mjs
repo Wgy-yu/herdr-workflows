@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compileWorkflowDefinition, loadBuiltInTemplate } from "../workflow-definition.mjs";
-import { repairWorkflow, replayWorkflow, startStoredWorkflow, writeStageReport } from "../workflow-store.mjs";
+import { applyStoredEvent, repairWorkflow, replayWorkflow, startStoredWorkflow, writeStageReport } from "../workflow-store.mjs";
 
 const contract = () => compileWorkflowDefinition(loadBuiltInTemplate("development"));
 
@@ -40,5 +40,16 @@ test("reports are bounded and immutable", async () => {
     await writeStageReport(root, envelope, "ok");
     await assert.rejects(writeStageReport(root, envelope, "again"), /REPORT_IMMUTABLE/);
     await assert.rejects(writeStageReport(root, { phaseId: "../escape", attempt: 1 }, "x"), /REPORT_PATH_ESCAPE/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("concurrent duplicate events append and advance exactly once", async () => {
+  const root = mkdtempSync(join(tmpdir(), "herdr-store-"));
+  try {
+    const state = await startStoredWorkflow(root, contract());
+    const event = { type: "TURN_DISPATCHED", eventId: "same", runId: state.runId, phaseId: "design", attempt: 1, role: "leader" };
+    const results = await Promise.all([applyStoredEvent(root, event), applyStoredEvent(root, event)]);
+    assert.equal(results.filter((item) => item.accepted).length, 1);
+    assert.equal(replayWorkflow(root).sequence, 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
