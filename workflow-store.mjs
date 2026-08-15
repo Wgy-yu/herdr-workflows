@@ -100,8 +100,10 @@ export async function applyStoredEvent(root, event, options = {}) {
 
 export async function appendStoredAuditEvent(root, event) {
   return withWorkflowLock(root, async () => {
-    appendFileSync(pathOf(root, "events.jsonl"), `${JSON.stringify({ audit: true, at: new Date().toISOString(), event })}\n`, "utf8");
-    return event;
+    const file = pathOf(root, "events.jsonl");
+    if (event.eventId && existsSync(file) && readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).some((line) => { try { return JSON.parse(line).event?.eventId === event.eventId; } catch { return false; } })) return { event, duplicate: true };
+    appendFileSync(file, `${JSON.stringify({ audit: true, at: new Date().toISOString(), event })}\n`, "utf8");
+    return { event, duplicate: false };
   }, "audit-event");
 }
 
