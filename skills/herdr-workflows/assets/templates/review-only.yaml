@@ -1,0 +1,28 @@
+version: 1
+workflow_id: review-only
+template: review-only
+max_rework: 3
+roles:
+  leader:
+    kind: leader
+    writable_paths: []
+  reviewer:
+    kind: reviewer
+    read_only: true
+    writable_paths: []
+phases:
+  - id: review
+    role: reviewer
+    kind: review
+    needs: []
+    callback:
+      type: review_complete
+      required_fields: [verdict, findings]
+  - id: decision
+    role: leader
+    kind: decision
+    needs: [review]
+    protected: true
+    callback:
+      type: final_decision
+      required_fields: [decision, rationale]

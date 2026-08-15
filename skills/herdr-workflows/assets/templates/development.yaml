@@ -1,0 +1,61 @@
+version: 1
+workflow_id: development
+template: development
+max_rework: 3
+roles:
+  leader:
+    kind: leader
+    writable_paths: []
+  implementer:
+    kind: implementer
+    writable_paths:
+      - src/**
+  reviewer:
+    kind: reviewer
+    read_only: true
+    writable_paths: []
+phases:
+  - id: design
+    role: leader
+    kind: design
+    needs: []
+    callback:
+      type: plan
+      required_fields: [plan_path, accepted]
+  - id: implement
+    role: implementer
+    kind: implementation
+    needs: [design]
+    required_tests: [unit]
+    callback:
+      type: implementation_complete
+      required_fields: [changed_files, test_results]
+  - id: review
+    role: reviewer
+    kind: review
+    needs: [implement]
+    callback:
+      type: review_complete
+      required_fields: [verdict, findings]
+  - id: rework
+    role: leader
+    kind: rework
+    needs: [review]
+    callback:
+      type: rework_decision
+      required_fields: [required, instructions]
+  - id: verify
+    role: reviewer
+    kind: verification
+    needs: [rework]
+    callback:
+      type: verification_complete
+      required_fields: [verdict, evidence]
+  - id: decision
+    role: leader
+    kind: decision
+    needs: [verify]
+    protected: true
+    callback:
+      type: final_decision
+      required_fields: [decision, rationale]
