@@ -62,7 +62,7 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
 
 ## Herdr 原生事件桥接（do/goal 共用）
 
-- `herdr-plugin.toml` 注册 `dispatch`、`callback`、`repair` Actions 和 `pane.agent_status_changed`。
+- `herdr-plugin.toml` 注册模板化 `init-*`、`dispatch`、`callback`、`repair` Actions 和 `pane.agent_status_changed`。
 - 运行前用 `herdr plugin list --plugin wgy.herdr-workflows-bridge` 确认无 manifest warning。
 - 生命周期事件只写入 `.herdr/workflow/events.jsonl` 审计并唤醒引擎；语义推进只接受认证 callback。
 - 插件通过官方 Socket API 定位当前工作区 Agent。消息只包含关联元数据和契约路径。
@@ -119,8 +119,9 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
 
 ## mode=init：首次安装初始化
 
-输入：可指定项目路径、工作流名、`leader`、`implementer`、`reviewer` 或是否立即启动
-工作流。初始化是配置向导，不把当前 Codex 会话隐式当作 Leader，也不静默安装软件。
+输入：可指定项目路径、工作流名、模板、模板所需角色或是否立即启动工作流。初始化是 Codex
+中的项目配置向导；用户无需手工创建或编辑 YAML。不得把当前 Codex 会话隐式当作 Leader，
+也不静默安装软件。
 init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=workflow）”顺序执行，
 共享同一套结构化配置工具和安全门禁，不通过终端复制粘贴伪造两个 mode 的结果。
 
@@ -129,27 +130,38 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 2. 汇总 `available`/`available_with_warnings` Agent，展示 kind、命令、启动方式、最大权限
    参数验证状态和 Superpowers 状态。`not_installed`、`unsupported_adapter` 或未验证最大
    权限参数的 Agent 不能被静默纳入角色。
-3. 让用户明确选择 Leader、实施者和审核者，并明确选择该工作流是否 `use_superpowers`。没有明确选择角色时保持 `null` 并停止进入工作流；
-   不按当前客户端、Agent 排序或插件默认值推断 Leader。允许同一 Agent 承担多个角色，但
-   必须把该决定写入项目配置并在摘要中提示。
+3. 让用户先选择 `development`、`frontend-backend`、`review-only` 或受限自建模板，再按模板
+   明确选择角色：`development` 需要 `leader`、`implementer`、`reviewer`；
+   `frontend-backend` 需要 `leader`、`frontend`、`backend`、`reviewer`；`review-only` 需要
+   `leader`、`reviewer`。同时明确选择该工作流是否 `use_superpowers`。没有明确选择必需角色
+   时保持 `null` 并停止进入工作流；不按当前客户端、Agent 排序或插件默认值推断 Leader。
+   允许同一 Agent 承担多个非并行角色，但并行实施角色必须绑定不同 Agent；所有绑定写入项目配置并在摘要中提示。
 4. 仅当用户确认 `use_superpowers=true` 时，对用户选中的每个 Agent 处理 Superpowers：按适配器启动并确认目标 Agent 已就绪；已存在则记录；缺失且适配器有非空、已验证的
    `install` 时，逐个展示来源与命令，取得该 Agent 的单独确认后，通过无等待的 `agent.prompt`
    发送安装指令并记录已下发；后续由用户再次运行 `check` 或由事件通知确认结果；`install: null` 时只展示官方说明并标记为待用户手动
    完成，禁止自行拼接安装命令或宣称已安装。
-5. 使用 `scripts/config-tool.mjs update` 写入全局 Agent 配置（只写明确字段、保留未知字段）
-   并校验；不得把 API Key、Token、密码或其他秘密写入配置。
-6. 使用同一个结构化 `update` 工具创建或更新项目 `<repo>/.herdr/workflows.yaml`：设置
-   `default_workflow`、所选工作流的 `leader`/`implementer`/`reviewer`、`use_superpowers`、`event_bridge_required: true`、审查只读约束、返修
-   次数、通过条件和可选 `role_rotation`；不得手工拼接 YAML。已有项目绑定保留，只有用户确认的字段才覆盖。
-7. 运行项目校验与 `config-tool.mjs merge`，输出全局配置、项目工作流、角色映射、Superpowers
-   状态及待办。只有三类角色已明确绑定、配置校验通过且（`use_superpowers=true` 时）安装门禁满足时才输出 `INIT_READY`；
+5. 项目初始化只调用已安装插件的 CLI Action，不由 Codex 手工写配置。按模板调用：
+   `herdr plugin action invoke wgy.herdr-workflows-bridge.init-development`、
+   `init-frontend-backend` 或 `init-review-only`；`init` 是 `init-development` 的兼容别名。
+   Action 查询当前 workspace 的 Agent，并用结构化配置工具创建或更新
+   `<repo>/.herdr/workflows.yaml`。
+6. 读取插件日志中的结构化结果。`INIT_READY` 必须包含模板、角色映射和配置路径；
+   `INIT_INPUT_REQUIRED` 必须包含可用 Agent 与缺失角色，且不会写入半成品配置。前后端模板的
+   `frontend`、`backend` 必须绑定不同 Agent；所有模板固定写入
+   `event_bridge_required: true`、`structured_callbacks_required: true`、
+   `scope_checks_required: true`、`final_decision_required: true`。
+7. Action 内部完成项目校验；输出项目工作流、角色映射、Superpowers
+   状态及待办。只有所选模板的全部必需角色已明确绑定、配置校验通过且
+   （`use_superpowers=true` 时）安装门禁满足时才输出 `INIT_READY`；
    否则输出 `INIT_INCOMPLETE` 和阻塞项。除非用户明确指定立即运行，否则初始化到此结束。
-8. 若运行在 Herdr 环境，检查并注册外置事件桥接：优先使用
+8. 检查并注册外置事件桥接：优先使用
    `herdr plugin install Wgy-yu/herdr-workflows --yes`，本地开发使用
    `herdr plugin link <插件根目录>`；注册后用 `herdr plugin list --plugin wgy.herdr-workflows-bridge`
    确认无 manifest warning。用户拒绝或 Herdr 版本低于 `0.7.0` 时，配置可以保存但必须输出
    `INIT_INCOMPLETE EVENT_BRIDGE_REQUIRED`；若用户要求立即进入 `mode=do`，必须停止，不能
-   退回普通点对点等待。
+    退回普通点对点等待。用户明确要求初始化后立即运行时，将用户的实际任务原文写入
+    `<repo>/.herdr/workflow-request.md`，再调用 `dispatch` Action；没有任务正文时停在
+    `INIT_READY`，不得派发空任务。
 
 ## mode=config：配置本机 Agent 能力和默认分工
 
@@ -170,9 +182,9 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 输入：入口运行时参数可指定工作流名或要修改的字段。写入授权：只写项目覆盖配置
 `<repo>/.herdr/workflows.yaml`，不写用户全局配置。
 
-1. 项目可定义多个命名工作流和一个默认工作流；每个工作流至少包含：Leader、实施者、
-   审核者角色绑定；设计、计划、实施、审查、返修和最终验收的步骤顺序；各步骤是否
-   启用及所需 Skill；Reviewer 源码只读约束；最大返修次数与超限接管者；通过和拒绝的输出条件。
+1. 项目可定义多个命名工作流和一个默认工作流。先选择内置模板或受限自建模板，再按模板
+   绑定角色；配置包含模板、`roles.<role>.agent`、最大返修次数及不可关闭的结构化 callback、
+   写入范围检查和 Leader 最终裁决门禁。
    必须明确 `use_superpowers` 是否启用；可选开启 `role_rotation`，允许实施者与审查者在阶段边界轮换；默认关闭。
    开启角色轮换时，Leader、实施者、审查者必须是至少三个不同 Agent；轮换前只提示用户
    “两个 Agent 的模型能力不要差距过大”，不采集或比较真实模型能力。
@@ -220,17 +232,19 @@ callback、返修上限和 Leader 最终裁决。一个仓库同一时刻只允�
 
 1. 从 `development`、`frontend-backend`、`review-only` 选择模板，或在项目 YAML 的 `phases`
    上提供受限自建 DAG。`roles` 可替换 Agent；前后端模板必须分别声明不重叠的 `writable_paths`。
-2. 调用插件 `dispatch` Action。Action 编译不可变契约，拒绝可执行 shell、关闭安全门禁、缺失 callback、
+2. 将入口中用户提供的真实任务原文写入仓库根目录 `.herdr/workflow-request.md`；该文件是
+   无参数 Herdr Action 的请求信封。任务为空时停止并请求任务正文，不得派发占位任务。
+3. 调用插件 `dispatch` Action。Action 编译不可变契约，拒绝可执行 shell、关闭安全门禁、缺失 callback、
    可写 Reviewer、无界返修、无最终 Leader 裁决、无环失败和未汇合并行分支。
-3. 每个 Agent 只接收短消息以及 `.herdr/workflow/contract.json` 指针。完成后调用插件 `callback`
+4. 每个 Agent 只接收短消息以及 `.herdr/workflow/contract.json` 指针。完成后调用插件 `callback`
    Action，提交 workflow/run/phase/attempt/role/in_reply_to、一次性 token、结构化 payload 和 Markdown 报告。
-4. `pane.agent_status_changed` 仅唤醒引擎：`working` 是新回合证据，`idle`、`done`、`unknown`
+5. `pane.agent_status_changed` 仅唤醒引擎：`working` 是新回合证据，`idle`、`done`、`unknown`
    都不证明阶段完成。没有通过认证的 callback 和报告时，阶段保持原状态。
-5. 引擎按 DAG 下发所有 READY 阶段；并行分支全部 APPROVED 后才释放 join。已确认问题进入有界返修，
+6. 引擎按 DAG 下发所有 READY 阶段；并行分支全部 APPROVED 后才释放 join。已确认问题进入有界返修，
    超过 `max_rework` 或连续自动转换超过 8 次时进入 BLOCKED，由 Leader 明确恢复或裁决。
-6. 投影损坏时调用 `repair` Action，从 `.herdr/workflow/events.jsonl` 重放；不读取或迁移旧
+7. 投影损坏时调用 `repair` Action，从 `.herdr/workflow/events.jsonl` 重放；不读取或迁移旧
    `.herdr/workflow-state.json`、`workflow-plan.md`、`workflow-events.jsonl`。
-7. Reviewer 对业务源码只读，Leader 独立验证测试并提交 `FINAL_DECISION`。只有该裁决可以结束工作流。
+8. Reviewer 对业务源码只读，Leader 独立验证测试并提交 `FINAL_DECISION`。只有该裁决可以结束工作流。
 
 ### 执行适配器
 

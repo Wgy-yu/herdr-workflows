@@ -180,24 +180,48 @@ herdr agent list
 $herdr-workflows:init
 ```
 
+实际配置由 Herdr 插件 CLI Action 完成。先在 Herdr 中打开目标项目和所需 Agent，再按模板执行：
+
+```powershell
+# 常规开发（init 是该 Action 的兼容别名）
+herdr plugin action invoke wgy.herdr-workflows-bridge.init-development
+
+# 前后端并行
+herdr plugin action invoke wgy.herdr-workflows-bridge.init-frontend-backend
+
+# 只读审查
+herdr plugin action invoke wgy.herdr-workflows-bridge.init-review-only
+```
+
+Action 会从当前 workspace 选择 Agent，并通过结构化工具生成 `.herdr/workflows.yaml`，用户和
+Codex 都不需要手工配置。若 Agent 数量不足，日志返回 `INIT_INPUT_REQUIRED`、可用 Agent 和
+缺失角色，不写入半成品配置。Codex 中的 `$herdr-workflows:init`（或 `$init`）只是代用户调用上述 CLI Action。
+
 ## 项目配置
 
 配置文件为 `<repo>/.herdr/workflows.yaml`，使用结构化工具写入，不要手工拼接 YAML。
 
 ```yaml
-default_workflow: default
+default_workflow: web
 workflows:
-  default:
-    leader: codex-leader
-    implementer: opencode-editor
-    reviewer: claude-reviewer
-    reviewer_read_only: true
+  web:
+    template: frontend-backend
+    roles:
+      leader:
+        agent: codex-leader
+      frontend:
+        agent: opencode-frontend
+        writable_paths: ["frontend/**"]
+      backend:
+        agent: opencode-backend
+        writable_paths: ["backend/**"]
+      reviewer:
+        agent: claude-reviewer
     use_superpowers: true
     event_bridge_required: true
-    role_rotation:
-      enabled: false
-      interval_minutes: 120
-      max_switches: 2
+    structured_callbacks_required: true
+    scope_checks_required: true
+    final_decision_required: true
 ```
 
 ### `use_superpowers`
@@ -239,13 +263,19 @@ role_rotation:
 
 项目配置可以替换 `roles.<role>.agent`，也可以在模板基础上提供受限 `phases`。实施角色必须声明非空且互不重叠的 `writable_paths` 和必跑测试；Reviewer 业务源码只读。结构化 callback、范围检查、返修上限和最终 Leader 裁决不可关闭。
 
-启动、回调和恢复分别使用插件 Actions：
+初始化、启动、回调和恢复都使用插件 Actions：
 
 ```powershell
+herdr plugin action invoke wgy.herdr-workflows-bridge.init-development
 herdr plugin action invoke wgy.herdr-workflows-bridge.dispatch
 herdr plugin action invoke wgy.herdr-workflows-bridge.callback
 herdr plugin action invoke wgy.herdr-workflows-bridge.repair
 ```
+
+日常实际使用不需要手工调用这些 Action。在 Codex 中输入
+`$herdr-workflows:do <你的任务>`（或简写 `$do <你的任务>`），入口会把任务写入
+`.herdr/workflow-request.md` 并调用 `dispatch`；Action 成功接收后会把请求持久化到
+`.herdr/workflow/request.md`。
 
 运行数据只写入 `<repo>/.herdr/workflow/`：`contract.json`、`events.jsonl`、`state.json`、`phases/*.json` 和 `reports/*.md`。插件不会读取或迁移旧的 `.herdr/workflow-state.json`、`.herdr/workflow-plan.md` 或 `.herdr/workflow-events.jsonl`。
 

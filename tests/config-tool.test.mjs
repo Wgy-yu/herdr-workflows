@@ -103,6 +103,22 @@ test("init 入口声明配置、Superpowers 与 Agent 直连能力", () => {
   assert.match(workflowsSkill, /模型能力不要差距过大/);
   assert.match(workflowsSkill, /use_superpowers/);
   assert.match(workflowsSkill, /至少三个不同 Agent/);
+  assert.match(workflowsSkill, /development.*frontend-backend.*review-only/s);
+  assert.match(workflowsSkill, /roles\.<role>\.agent/);
+  assert.match(workflowsSkill, /structured_callbacks_required: true/);
+  assert.match(workflowsSkill, /scope_checks_required: true/);
+  assert.match(workflowsSkill, /final_decision_required: true/);
+  assert.match(workflowsSkill, /\.herdr\/workflow-request\.md/);
+  assert.match(initSkill, /无需手工创建 YAML/);
+  assert.match(initSkill, /init-\*/);
+  assert.match(initSkill, /不得绕过 Action 直接代写/);
+});
+
+test("do 和 goal 在无参数 Action 派发前写入真实任务请求", () => {
+  const workflowsSkill = readFileSync(workflowsSkillFile, "utf8");
+  assert.match(workflowsSkill, /真实任务原文写入仓库根目录 `\.herdr\/workflow-request\.md`/);
+  assert.match(workflowsSkill, /任务为空时停止/);
+  assert.match(workflowsSkill, /无参数 Herdr Action/);
 });
 
 test("do 工作流只允许事件驱动下发", () => {

@@ -1,6 +1,6 @@
 id = "wgy.herdr-workflows-bridge"
 name = "Herdr Native Workflow Engine"
-version = "0.3.0"
+version = "0.4.0"
 min_herdr_version = "0.7.0"
 description = "Run single-active template or custom DAG workflows through authenticated callbacks and Herdr lifecycle events."
 platforms = ["linux", "macos", "windows"]
@@ -8,6 +8,30 @@ platforms = ["linux", "macos", "windows"]
 [[events]]
 on = "pane.agent_status_changed"
 command = ["node", "herdr-event-bridge.mjs"]
+
+[[actions]]
+id = "init"
+title = "Initialize development workflow"
+contexts = ["workspace"]
+command = ["node", "herdr-workflow-init.mjs"]
+
+[[actions]]
+id = "init-development"
+title = "Initialize development workflow"
+contexts = ["workspace"]
+command = ["node", "herdr-workflow-init.mjs"]
+
+[[actions]]
+id = "init-frontend-backend"
+title = "Initialize frontend/backend workflow"
+contexts = ["workspace"]
+command = ["node", "herdr-workflow-init.mjs"]
+
+[[actions]]
+id = "init-review-only"
+title = "Initialize review-only workflow"
+contexts = ["workspace"]
+command = ["node", "herdr-workflow-init.mjs"]
 
 [[actions]]
 id = "dispatch"
