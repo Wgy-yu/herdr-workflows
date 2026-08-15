@@ -173,6 +173,7 @@ export function validateProjectConfig(value) {
           continue;
         }
         for (const key of [
+          "template",
           "leader",
           "implementer",
           "reviewer",
@@ -184,6 +185,12 @@ export function validateProjectConfig(value) {
           if (field !== undefined && field !== null && typeof field !== "string") {
             errors.push(`${base}.${key} 必须是字符串或 null`);
           }
+        }
+        if (workflow.roles !== undefined && !isPlainObject(workflow.roles)) errors.push(`${base}.roles 必须是对象`);
+        if (workflow.phases !== undefined && !Array.isArray(workflow.phases)) errors.push(`${base}.phases 必须是数组`);
+        if (workflow.capabilities !== undefined && !isPlainObject(workflow.capabilities)) errors.push(`${base}.capabilities 必须是对象`);
+        for (const gate of ["event_bridge_required", "structured_callbacks_required", "scope_checks_required", "final_decision_required"]) {
+          if (workflow[gate] !== undefined && workflow[gate] !== true) errors.push(`${base}.${gate} 必须为 true；该安全门禁不可关闭`);
         }
         if (
           workflow.reviewer_read_only !== undefined &&
@@ -425,14 +432,26 @@ function normalizeWorkflow(name, workflow, runtime) {
       steps[stepName] = normalized;
     }
   }
+  const normalizedRoles = {};
+  for (const [role, value] of Object.entries(workflow.roles ?? {})) {
+    normalizedRoles[role] = typeof value === "string" ? { agent: value } : structuredClone(value);
+  }
   return {
+    ...structuredClone(workflow),
     name,
+    template: workflow.template ?? "development",
+    roles: normalizedRoles,
+    phases: Array.isArray(workflow.phases) ? structuredClone(workflow.phases) : null,
+    capabilities: structuredClone(workflow.capabilities ?? {}),
     leader: runtime.leader ?? workflow.leader ?? null,
     implementer: runtime.implementer ?? workflow.implementer ?? null,
     reviewer: runtime.reviewer ?? workflow.reviewer ?? null,
     reviewerReadOnly: workflow.reviewer_read_only ?? true,
     useSuperpowers: workflow.use_superpowers ?? true,
     eventBridgeRequired: workflow.event_bridge_required ?? true,
+    structuredCallbacksRequired: workflow.structured_callbacks_required ?? true,
+    scopeChecksRequired: workflow.scope_checks_required ?? true,
+    finalDecisionRequired: workflow.final_decision_required ?? true,
     steps,
     maxRework: workflow.max_rework ?? 5,
     takeoverOnExceed: workflow.takeover_on_exceed ?? "leader",

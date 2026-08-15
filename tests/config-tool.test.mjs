@@ -16,6 +16,26 @@ import {
   updateConfigFile,
 } from "../skills/herdr-workflows/scripts/config-tool.mjs";
 
+test("template config normalizes Agent replacements and preserves custom DAG", () => {
+  const merged = mergeConfig(
+    { default_workflow: "default", workflows: { default: { template: "frontend-backend", event_bridge_required: true, structured_callbacks_required: true, scope_checks_required: true, final_decision_required: true } } },
+    {},
+    { workflows: { default: { roles: { frontend: "claude", backend: { agent: "opencode", writable_paths: ["server/**"] } }, phases: [{ id: "custom" }], future_field: "keep" } } },
+    {}
+  );
+  assert.equal(merged.workflow.template, "frontend-backend");
+  assert.equal(merged.workflow.roles.frontend.agent, "claude");
+  assert.deepEqual(merged.workflow.phases, [{ id: "custom" }]);
+  assert.equal(merged.workflow.future_field, "keep");
+});
+
+test("protected orchestration gates cannot be disabled", () => {
+  for (const gate of ["event_bridge_required", "structured_callbacks_required", "scope_checks_required", "final_decision_required"]) {
+    const errors = validateProjectConfig({ workflows: { default: { [gate]: false } } });
+    assert.match(errors.join("\n"), /必须为 true/);
+  }
+});
+
 const TOOL = fileURLToPath(new URL("../skills/herdr-workflows/scripts/config-tool.mjs", import.meta.url));
 const fixture = (name) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 const defaultsFile = fileURLToPath(new URL("../skills/herdr-workflows/assets/defaults.yaml", import.meta.url));

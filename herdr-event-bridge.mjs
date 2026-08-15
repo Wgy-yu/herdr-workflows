@@ -10,9 +10,32 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { mergeConfig, parseYamlFile } from "./skills/herdr-workflows/scripts/config-tool.mjs";
 import { canTransitionWorkflow, nextWorkflowStatus, observeWorkingUnlocked, readWorkflowState, transitionWorkflowUnlocked, withWorkflowLock } from "./workflow-state.mjs";
+import { appendStoredAuditEvent, applyStoredEvent, readStoredWorkflow } from "./workflow-store.mjs";
 
 const DEFAULT_EVENT = "pane.agent_status_changed";
 const ROUTABLE_STATUSES = new Set(["done", "idle", "blocked"]);
+
+export async function handleNativeLifecycleEvent({ projectRoot, event }) {
+  const state = readStoredWorkflow(projectRoot);
+  const contract = JSON.parse(readFileSync(join(projectRoot, ".herdr", "workflow", "contract.json"), "utf8"));
+  const active = Object.entries(state.phases).find(([id, phase]) =>
+    ["DISPATCHED", "RUNNING"].includes(phase.status) && contract.roles[contract.phases[id].role]?.agent === event.agent
+  );
+  if (!active) {
+    await appendStoredAuditEvent(projectRoot, { type: "LIFECYCLE_OBSERVED", status: event.status, agent: event.agent, ignored: true });
+    return { handled: false, reason: "phase-not-active" };
+  }
+  const [phaseId, phase] = active;
+  const base = { runId: state.runId, phaseId, attempt: phase.attempt, role: contract.phases[phaseId].role };
+  if (event.status === "working" && phase.status === "DISPATCHED") {
+    return applyStoredEvent(projectRoot, { ...base, type: "TURN_STARTED", eventId: event.eventId, inReplyTo: phase.dispatchedEventId });
+  }
+  if (event.status === "blocked") {
+    return applyStoredEvent(projectRoot, { ...base, type: "PHASE_BLOCKED", eventId: event.eventId, payload: { reason: event.reason } });
+  }
+  await appendStoredAuditEvent(projectRoot, { ...base, type: "LIFECYCLE_OBSERVED", eventId: event.eventId, status: event.status });
+  return { handled: true, semanticTransition: false, callbackRequired: ["idle", "done"].includes(event.status) };
+}
 
 function normalizeEventName(value) {
   if (value === "pane_agent_status_changed") return DEFAULT_EVENT;
@@ -383,6 +406,9 @@ export async function handleEvent(options = {}) {
   }
   if (!projectRoot) {
     return { handled: false, reason: "project-config-not-found", event };
+  }
+  if (existsSync(join(projectRoot, ".herdr", "workflow", "state.json"))) {
+    return handleNativeLifecycleEvent({ projectRoot, event: { ...event, eventId: `lifecycle-${eventKey(event) ?? Date.now()}` } });
   }
 
   let loaded;

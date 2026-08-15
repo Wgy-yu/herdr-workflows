@@ -13,7 +13,11 @@ import {
   eventKey,
   findAgentTarget,
   normalizeSocketPath,
+  handleNativeLifecycleEvent,
 } from "../herdr-event-bridge.mjs";
+import { compileWorkflowDefinition, loadBuiltInTemplate } from "../workflow-definition.mjs";
+import { applyStoredEvent, readStoredWorkflow, startStoredWorkflow } from "../workflow-store.mjs";
+import { createDispatchEnvelope } from "../workflow-protocol.mjs";
 import { readWorkflowState, startWorkflow } from "../workflow-state.mjs";
 
 function bridgeFixture(prefix) {
@@ -53,6 +57,20 @@ test("解析 Herdr 0.8 真实 Agent 状态事件并归一化订阅名", () => {
     status: "done",
     revision: 17,
   });
+});
+
+test("native idle and done are wakeups and never semantic completion", async () => {
+  const root = mkdtempSync(join(tmpdir(), "herdr-native-event-"));
+  try {
+    const contract = compileWorkflowDefinition(loadBuiltInTemplate("development"), { agents: { leader: "codex", implementer: "worker", reviewer: "reviewer" } });
+    let state = await startStoredWorkflow(root, contract);
+    const dispatch = createDispatchEnvelope(state, "design", contract);
+    await applyStoredEvent(root, { type: "TURN_DISPATCHED", eventId: dispatch.eventId, runId: state.runId, phaseId: "design", attempt: 1, role: "leader", callbackTokenHash: dispatch.callbackTokenHash });
+    const result = await handleNativeLifecycleEvent({ projectRoot: root, event: { agent: "codex", status: "done", eventId: "done-1" } });
+    assert.equal(result.semanticTransition, false);
+    assert.equal(result.callbackRequired, true);
+    assert.equal(readStoredWorkflow(root).phases.design.status, "DISPATCHED");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("实施者完成后路由到审查者，审查者完成后路由到 Leader", () => {

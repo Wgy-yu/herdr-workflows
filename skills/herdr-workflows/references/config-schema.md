@@ -161,3 +161,15 @@ tarball 完整性摘要；下载 tarball 后校验 SHA-512 与 registry 一致�
 `check-agents.ps1` 等 PowerShell 脚本需要读取 YAML（如 `agent-adapters.yaml`）时，
 必须通过 `node config-tool.mjs to-json --file <path>` 结构化转换，不得在 PowerShell 中
 用正则或字符串拼接解析 YAML。找不到 Node 时输出 `NODE_NOT_FOUND` 并返回 1。
+# 原生编排字段
+
+每个 `workflows.<name>` 可设置：
+
+- `template`: `development`、`frontend-backend` 或 `review-only`。
+- `roles`: 角色到 Agent 与权限覆盖的映射，例如 `frontend.agent`、`writable_paths`、`read_only`。
+- `phases`: 可选自建 DAG；未设置时使用模板阶段。编译器校验依赖、join、callback、测试和最终裁决。
+- `capabilities`: Agent 能力声明；`goal: true` 才允许 Goal 适配器。
+- `max_rework`: 0 到 5。
+- `event_bridge_required`、`structured_callbacks_required`、`scope_checks_required`、`final_decision_required`: 只能为 `true`。
+
+未知字段在结构化读改写时保留；项目配置仍禁止秘密字段和绝对可执行路径。

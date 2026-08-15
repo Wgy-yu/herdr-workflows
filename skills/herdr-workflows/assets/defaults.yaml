@@ -3,6 +3,7 @@
 default_workflow: default
 workflows:
   default:
+    template: development
     # 首次安装由 $herdr-workflows:init 让用户明确选择角色，不预设 Codex 或其他 Agent。
     leader: null
     implementer: null
@@ -13,6 +14,9 @@ workflows:
     use_superpowers: true
     # 事件桥是 review/do 的强制完成通知通道，不允许关闭后退回等待或轮询。
     event_bridge_required: true
+    structured_callbacks_required: true
+    scope_checks_required: true
+    final_decision_required: true
     # 最大返修 5 次，超过上限由 Leader 接管。
     max_rework: 5
     takeover_on_exceed: leader

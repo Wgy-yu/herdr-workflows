@@ -227,59 +227,37 @@ role_rotation:
 
 该字段固定为 `true`，不能关闭。`$herdr-workflows:do` 启动前必须确认
 `wgy.herdr-workflows-bridge` 已注册；否则输出 `EVENT_BRIDGE_REQUIRED` 并停止，不会退回
-`agent.wait`、`agent.prompt --wait` 或终端轮询。该门禁不约束 `$herdr-workflows:goal`。
+终端轮询。`do` 与 `goal` 都通过该插件持久化同一工作流契约。
 
-## Goal 等待模式
+## 原生事件驱动编排
 
-`mode=goal` 复用参考仓库首次发布的 `do` 完整闭环：计划读取回执、实施证据、Reviewer
-只读复核、审查意见验证、连续返修、超限接管、角色轮换和 Leader 最终验收均保留。唯一的
-调度差异是固定使用带等待回执的 `agent.prompt` 和 `agent.wait`，不调用事件桥 `dispatch`
-Action，也不依赖 `.herdr/workflow-state.json`。
+`do` 与 `goal` 共用同一编排引擎和 `.herdr/workflow/contract.json`，每个仓库只允许一个活动工作流。内置模板：
 
-因此两种开发入口互斥：`do` 只由官方状态事件推进，`goal` 只由当前 Goal 内的官方等待
-原语推进。两者共享 Reviewer 只读、返修上限和 Leader 最终裁决规则。
+- `development`：设计、实施、审查、返修、验证、Leader 裁决。
+- `frontend-backend`：前后端并行实施，显式 join 后集成审查。
+- `review-only`：Reviewer 只读审查，Leader 汇总裁决。
 
-## 事件桥接行为
+项目配置可以替换 `roles.<role>.agent`，也可以在模板基础上提供受限 `phases`。实施角色必须声明非空且互不重叠的 `writable_paths` 和必跑测试；Reviewer 业务源码只读。结构化 callback、范围检查、返修上限和最终 Leader 裁决不可关闭。
 
-`mode=do` 不再由 Leader 直接调用 `agent.prompt`。Leader 先把已确认计划写入
-`<repo>/.herdr/workflow-plan.md`，然后调用插件的一次性 Action：
+启动、回调和恢复分别使用插件 Actions：
 
 ```powershell
 herdr plugin action invoke wgy.herdr-workflows-bridge.dispatch
+herdr plugin action invoke wgy.herdr-workflows-bridge.callback
+herdr plugin action invoke wgy.herdr-workflows-bridge.repair
 ```
 
-Action 只执行 `agent.list` 和不带等待参数的短 `agent.prompt`；消息只包含共享计划路径，
-不内联计划正文。下发成功后立即退出。当前阶段
-原子写入 `<repo>/.herdr/workflow-state.json`，后续只有官方 Herdr 状态事件可以迁移阶段：
+运行数据只写入 `<repo>/.herdr/workflow/`：`contract.json`、`events.jsonl`、`state.json`、`phases/*.json` 和 `reports/*.md`。插件不会读取或迁移旧的 `.herdr/workflow-state.json`、`.herdr/workflow-plan.md` 或 `.herdr/workflow-events.jsonl`。
 
-1. `READY` → dispatch → `IMPLEMENTATION_RUNNING`。
-2. 实施者 `done` → `REVIEW_RUNNING`，通知审查者把完整结论写入
-   `<repo>/.herdr/reviews/<runId>.md`。
-3. 审查者 `done` 且审核结果文件非空 → `FINAL_DECISION_PENDING`，只把文件路径和结束状态
-   通知 Leader 裁决；文件缺失时保持 `REVIEW_RUNNING` 并短消息唤回审查者。
-4. 实施者或审查者 `blocked` → `BLOCKED`，直接通知 Leader。
+每个阶段通过一次性 token、workflow/run/phase/attempt/role 和 `in_reply_to` 提交认证 callback。`working` 只证明新回合开始；`idle`、`done`、`unknown` 只唤醒引擎，不会让阶段语义完成。并行分支全部通过才释放 join；自动转换超过 8 次或返修超限时进入 `BLOCKED`。
 
-处于错误阶段的完成事件会返回 `workflow-state-not-routable`，不能靠终端读取、自报文本或
-手工转发推进工作流。Leader 裁决为返修时，更新共享计划并再次调用 dispatch 即可开始下一轮。
-
-桥接同时兼容清单订阅名 `pane.agent_status_changed` 和 Herdr 0.8 真实载荷类型
-`pane_agent_status_changed`。事件追加到 `<repo>/.herdr/workflow-events.jsonl`；有状态序号时按
-序号去重，无状态序号时按工作区、pane、Agent、状态和当前阶段去重。
-
-桥接启用后：
-
-1. 实施者进入 `done`：直接通知审查者读取共享计划，并把完整审核结论写入本轮审核结果文件。
-2. 审查者进入 `done`：审核文件非空后，只向 Leader 发送结束消息、审核文件路径和状态路径。
-3. 实施者或审查者进入 `blocked`：直接通知 Leader 处理阻塞。
-4. 目标 Agent 不可用：退回 Herdr `notification.show`，不让 Leader 充当消息中继。
-5. 事件状态不匹配或重复时拒绝迁移，不通知下一角色。
+`mode=goal` 仅在目标 Agent 明确声明 Goal 能力时使用 Goal，否则记录普通 turn fallback。两种模式都使用单一绝对 deadline，不对已处于 `working` 的 Agent 重复派发。
 
 查看桥接日志：
 
 ```powershell
 herdr plugin log list --plugin wgy.herdr-workflows-bridge --limit 50
 ```
-
 ## 评审与开发约束
 
 - `review` 模式只允许创建或追加共享 Markdown 评审单，不修改业务源码。

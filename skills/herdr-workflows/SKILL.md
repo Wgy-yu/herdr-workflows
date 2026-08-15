@@ -227,69 +227,31 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
 11. 终止条件：评审单含完整轮次与 Leader 最终裁决；面向用户只返回裁决摘要和评审单路径，
     不在终端重复整份长文本。点对点通信失败或出现评审单之外的写入时报告流程失败。
 
-## mode=do：多 Agent 开发实施闭环
+## do/goal 共用原生编排协议
 
-输入：入口运行时参数可指定工作流名或角色覆盖。写入授权：只有实施者修改代码，
-范围限定在任务目标内；审核者始终只读；只有 Leader 可宣布最终通过。
+`do` 与 `goal` 只选择执行适配器，共用同一份 `.herdr/workflow/contract.json`、事件日志、阶段状态、
+callback、返修上限和 Leader 最终裁决。一个仓库同一时刻只允许一个活动工作流，两种入口互斥。
 
-1. 解析工作流并完成与 mode=review 相同的 Herdr 初始化和通信验收；随后检查
-   `event_bridge_required=true` 与 `wgy.herdr-workflows-bridge` 注册状态。任一条件不满足，
-   立即输出 `EVENT_BRIDGE_REQUIRED` 并停止，不创建实施任务。
-2. 按工作流执行设计与用户确认门禁（用户未确认不得进入实施）。
-3. 生成可执行计划并写入 `<repo>/.herdr/workflow-plan.md`，随后只调用
-   `herdr plugin action invoke wgy.herdr-workflows-bridge.dispatch`。不得由 Leader 直接调用
-   `agent.prompt` 下发实施任务；Action 负责无等待下发、写入 `IMPLEMENTATION_RUNNING` 后立即退出。
-4. 实施者修改代码并提供 diff 与验证证据。
-5. 审核者对业务源码只读复核，把完整结论写入本轮
-   `<repo>/.herdr/reviews/<runId>.md`，然后结束回合；事件桥只把该路径和结束消息发给 Leader。
-   文件缺失或为空时不得推进到最终裁决。当 `workflow.useSuperpowers=true` 时，Leader 使用
-   `superpowers:receiving-code-review` 验证审查意见，不盲从审核结论；关闭时跳过该 Skill，
-   仍保留审查和最终裁决门禁。
-6. 已确认问题返回实施者返修；达到工作流 `max_rework` 上限后由 `takeover_on_exceed`
-   指定的接管者处理，不再自动返修。
-7. 审核者通过后，Leader 读取本轮审核结果文件，独立运行项目检查并作最终裁决。
-8. 实施者与审核者可通过 Herdr 点对点消息直接澄清证据、交接复核和反馈返修，不由 Leader
-   转发正文；双方不得自行宣布流程结束，实质结论必须对 Leader 可审计，且不得取消 Leader
-   最终裁决。用户可动态指定 Agent 分工。
-9. 插件状态机是强制完成推进通道：dispatch 后 Leader 结束当前动作；只有 Herdr 官方
-   `pane.agent_status_changed` 事件能把 `.herdr/workflow-state.json` 从
-   `IMPLEMENTATION_RUNNING` 推进到 `REVIEW_RUNNING`，再推进到 `FINAL_DECISION_PENDING`。
-   错误阶段、重复事件、终端读取和 Agent 自报文本都不能推进状态。桥接通知只负责唤醒
-   下一角色，不替代 Leader 的最终裁决。
-10. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
-       `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
-       配置校验已保证至少三个不同 Agent；每次切换前先向用户提示“两个 Agent 的模型能力不要差距过大”，
-       得到确认后再切换，不读取或比较真实模型能力；未确认则保持原角色。
-   `maxSwitches` 用于限制本轮轮换次数。轮换不改变 Reviewer 只读门禁。
-11. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
+1. 从 `development`、`frontend-backend`、`review-only` 选择模板，或在项目 YAML 的 `phases`
+   上提供受限自建 DAG。`roles` 可替换 Agent；前后端模板必须分别声明不重叠的 `writable_paths`。
+2. 调用插件 `dispatch` Action。Action 编译不可变契约，拒绝可执行 shell、关闭安全门禁、缺失 callback、
+   可写 Reviewer、无界返修、无最终 Leader 裁决、无环失败和未汇合并行分支。
+3. 每个 Agent 只接收短消息以及 `.herdr/workflow/contract.json` 指针。完成后调用插件 `callback`
+   Action，提交 workflow/run/phase/attempt/role/in_reply_to、一次性 token、结构化 payload 和 Markdown 报告。
+4. `pane.agent_status_changed` 仅唤醒引擎：`working` 是新回合证据，`idle`、`done`、`unknown`
+   都不证明阶段完成。没有通过认证的 callback 和报告时，阶段保持原状态。
+5. 引擎按 DAG 下发所有 READY 阶段；并行分支全部 APPROVED 后才释放 join。已确认问题进入有界返修，
+   超过 `max_rework` 或连续自动转换超过 8 次时进入 BLOCKED，由 Leader 明确恢复或裁决。
+6. 投影损坏时调用 `repair` Action，从 `.herdr/workflow/events.jsonl` 重放；不读取或迁移旧
+   `.herdr/workflow-state.json`、`workflow-plan.md`、`workflow-events.jsonl`。
+7. Reviewer 对业务源码只读，Leader 独立验证测试并提交 `FINAL_DECISION`。只有该裁决可以结束工作流。
 
-## mode=goal：Agent Goal 等待式开发实施闭环
+### 执行适配器
 
-本模式复用参考仓库 `6f444d7` 首次发布的 `mode=do` 完整闭环，只把完成推进固定为 Herdr
-官方 wait 原语。输入、写入授权和安全边界与 `mode=do` 相同。
-
-1. 解析工作流并完成与 mode=review 相同的 Herdr 初始化和通信验收。
-2. 按工作流执行设计与用户确认门禁（用户未确认不得进入实施）。
-3. 生成可执行计划并完成实施者的计划读取回执（逐字符核对）。
-4. 实施者修改代码并提供 diff 与验证证据。
-5. 审核者只读复核；当 `workflow.useSuperpowers=true` 时，Leader 使用
-   `superpowers:receiving-code-review` 验证审查意见，不盲从审核结论；关闭时跳过该 Skill，
-   仍保留审查和最终裁决门禁。
-6. 已确认问题返回实施者返修；达到工作流 `max_rework` 上限后由 `takeover_on_exceed`
-   指定的接管者处理，不再自动返修。
-7. 审核者通过后，Leader 独立运行项目检查并作最终裁决。
-8. 实施者与审核者可通过 Herdr 点对点消息直接澄清证据、交接复核和反馈返修，不由 Leader
-   转发正文；双方不得自行宣布流程结束，实质结论必须对 Leader 可审计，且不得取消 Leader
-   最终裁决。用户可动态指定 Agent 分工。
-9. mode=goal 不使用事件桥推进，不调用插件 `dispatch` Action，也不迁移
-   `.herdr/workflow-state.json`。Leader 使用带等待回执的 `agent.prompt` 下发当前阶段，并用
-   `agent.wait` 等待同一任务完成；不得用长时间终端轮询模拟等待，不得因超时重复派发。
-10. 当 `workflow.roleRotation.enabled=true` 时，Leader 可依据当前 Skill、上下文负载和
-    `intervalMinutes` 在阶段边界决定是否轮换实施者与审查者；不在 Agent 回合中途切换。
-    配置校验已保证至少三个不同 Agent；每次切换前先向用户提示“两个 Agent 的模型能力不要差距过大”，
-    得到确认后再切换，不读取或比较真实模型能力；未确认则保持原角色。
-    `maxSwitches` 用于限制本轮轮换次数。轮换不改变 Reviewer 只读门禁。
-11. 终止条件：Leader 宣布最终通过（或明确否决）；返修达上限且接管完成。
+- `mode=do`：使用普通 Agent turn；插件事件在状态变化时唤醒引擎。
+- `mode=goal`：仅在目标 Agent 明确声明 Goal 能力时使用 Goal；否则记录 fallback 并使用普通 turn。
+- 两种适配器都使用一次绝对 deadline。目标已处于 `working` 时记为 `DELIVERY_UNKNOWN`，由 Leader
+  核对现有回合；不重复派发。
 
 ## 权限和安全边界
 
