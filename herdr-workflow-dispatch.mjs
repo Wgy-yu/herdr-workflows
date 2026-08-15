@@ -51,9 +51,9 @@ export async function dispatchReadyPhases(root, request, options = {}) {
   }
   return outcomes;
 }
-export async function startNativeWorkflow({ projectRoot, template = "development", definition, agents = {}, mode = "do", request, workspaceId, timeoutMs }) {
+export async function startNativeWorkflow({ projectRoot, template = "development", definition, agents = {}, mode = "do", requestMarkdown, request, workspaceId, timeoutMs }) {
   const contract = compileWorkflowDefinition(definition ?? loadBuiltInTemplate(template), { agents });
-  await startStoredWorkflow(projectRoot, contract, mode);
+  await startStoredWorkflow(projectRoot, contract, mode, { requestMarkdown });
   const outcomes = await dispatchReadyPhases(projectRoot, request, { workspaceId, timeoutMs });
   return { state: readStoredWorkflow(projectRoot), contract, outcomes };
 }
@@ -64,6 +64,8 @@ async function main(env = process.env) {
   const workflow = loadWorkflow(root, env.HERDR_PLUGIN_ROOT ?? dirname(fileURLToPath(import.meta.url)), env);
   const configured = Object.fromEntries(Object.entries(workflow.roles ?? {}).map(([id, role]) => [id, role?.agent]).filter(([, agent]) => agent));
   const agents = { leader: workflow.leader, implementer: workflow.implementer, reviewer: workflow.reviewer, ...configured };
-  return startNativeWorkflow({ projectRoot: root, definition: definitionFromWorkflowConfig(workflow), agents, mode: context.mode ?? "do", workspaceId: context.workspace_id ?? env.HERDR_WORKSPACE_ID, request: (method, params) => requestSocket(env.HERDR_SOCKET_PATH, method, params) });
+  const requestFile = join(root, ".herdr", "workflow-request.md");
+  if (!existsSync(requestFile) || !readFileSync(requestFile, "utf8").trim()) throw new Error(`工作流请求不存在或为空：${requestFile}`);
+  return startNativeWorkflow({ projectRoot: root, definition: definitionFromWorkflowConfig(workflow), agents, requestMarkdown: readFileSync(requestFile, "utf8"), mode: context.mode ?? "do", workspaceId: context.workspace_id ?? env.HERDR_WORKSPACE_ID, request: (method, params) => requestSocket(env.HERDR_SOCKET_PATH, method, params) });
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main().then((value) => console.log(JSON.stringify(value))).catch((error) => { console.error(`HERDR_WORKFLOWS_DISPATCH_ERROR ${error.message}`); process.exitCode = 1; });

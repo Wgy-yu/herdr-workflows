@@ -13,6 +13,7 @@ export function createDispatchEnvelope(state, phaseId, contract) {
     requiredFields: [...definition.callback.requiredFields],
     callbackToken, callbackTokenHash: hashCallbackToken(callbackToken),
     contractPath: ".herdr/workflow/contract.json",
+    requestPath: ".herdr/workflow/request.md",
     callbackRequestPath: `.herdr/workflow/callbacks/${phaseId}-attempt-${phase.attempt}.json`,
   };
 }
@@ -51,6 +52,7 @@ export function formatDispatchMessage(envelope) {
     `callback_type=${envelope.callbackType}`, `callback_token=${envelope.callbackToken}`,
     `payload_required_fields=${envelope.requiredFields.join(",")}`,
     `contract_path=${envelope.contractPath}`,
+    `request_path=${envelope.requestPath}`,
     `callback_request_path=${envelope.callbackRequestPath}`,
     "将结构化字段、payload 和 report_markdown 写入 callback_request_path，然后执行：herdr plugin action invoke wgy.herdr-workflows-bridge.callback",
   ].join("\n");

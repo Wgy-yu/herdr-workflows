@@ -61,7 +61,7 @@ function writeProjections(root, state) {
   atomic(pathOf(root, "state.json"), state);
 }
 
-export async function startStoredWorkflow(root, contract, mode = "do") {
+export async function startStoredWorkflow(root, contract, mode = "do", options = {}) {
   return withWorkflowLock(root, async () => {
     assertStorePath(root);
     const stateFile = pathOf(root, "state.json");
@@ -69,6 +69,7 @@ export async function startStoredWorkflow(root, contract, mode = "do") {
     const state = createWorkflowState(contract, mode);
     mkdirSync(pathOf(root), { recursive: true });
     atomic(pathOf(root, "contract.json"), contract);
+    if (typeof options.requestMarkdown === "string" && options.requestMarkdown.trim()) atomic(pathOf(root, "request.md"), options.requestMarkdown.trimEnd() + "\n");
     atomic(pathOf(root, "definition.yaml"), `# compiled workflow: ${contract.template}\n`);
     state.sequence = 1;
     const created = { sequence: 1, type: "WORKFLOW_CREATED", eventId: randomUUID(), state };

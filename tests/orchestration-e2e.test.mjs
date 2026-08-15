@@ -27,7 +27,7 @@ test("frontend/backend fans out, joins, callbacks, finalizes and replays after r
     return handleCallback({ projectRoot: root, workspaceId: "w1", request, workflow_id: data.workflow_id, run_id: data.run_id, phase_id: phaseId, event_id: `complete-${phaseId}`, attempt: Number(data.attempt), role: data.role, in_reply_to: data.in_reply_to, callback_token: data.callback_token, type: data.callback_type, report_markdown: `# ${phaseId}\nverified`, payload });
   };
   try {
-    await startNativeWorkflow({ projectRoot: root, template: "frontend-backend", agents, mode: "do", request, workspaceId: "w1" });
+    await startNativeWorkflow({ projectRoot: root, template: "frontend-backend", agents, requestMarkdown: "Build and verify frontend and backend changes.", mode: "do", request, workspaceId: "w1" });
     await submit("design", { plan_path: ".herdr/design.md", accepted: true });
     assert.ok(prompts.has("frontend_implement"));
     assert.ok(prompts.has("backend_implement"));
