@@ -90,6 +90,15 @@ test("review and verification phases require a read-only reviewer role", () => {
   }
 });
 
+test("malformed decision needs returns validation errors instead of throwing", () => {
+  for (const malformedNeeds of [undefined, "verify", 1, { phase: "verify" }]) {
+    const definition = loadBuiltInTemplate("development");
+    definition.phases.find((phase) => phase.id === "decision").needs = malformedNeeds;
+    assert.doesNotThrow(() => validateWorkflowDefinition(definition));
+    assert.match(validateWorkflowDefinition(definition).join("\n"), /needs 必须是字符串数组/);
+  }
+});
+
 test("validator rejects unsafe and non-deterministic workflow definitions", () => {
   const definition = loadBuiltInTemplate("development");
   definition.max_rework = 6;

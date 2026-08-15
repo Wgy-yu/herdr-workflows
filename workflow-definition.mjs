@@ -89,7 +89,7 @@ function findCycle(phaseById) {
     if (visited.has(id)) return false;
     visiting.add(id);
     const phase = phaseById.get(id);
-    for (const dependency of phase?.needs ?? []) {
+    for (const dependency of Array.isArray(phase?.needs) ? phase.needs : []) {
       if (phaseById.has(dependency) && visit(dependency)) return true;
     }
     visiting.delete(id);
@@ -115,7 +115,7 @@ function findDecisionReachabilityErrors(phases, decision) {
     errors.push("decision 必须是唯一 sink 阶段");
   }
   const reachable = new Set([decision.id]);
-  const pending = [...decision.needs];
+  const pending = Array.isArray(decision.needs) ? [...decision.needs] : [];
   while (pending.length > 0) {
     const phaseId = pending.pop();
     if (reachable.has(phaseId)) continue;
