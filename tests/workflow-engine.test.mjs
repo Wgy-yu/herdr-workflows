@@ -175,6 +175,19 @@ test("FINAL_DECISION completes or rejects the workflow and finalizes exactly onc
     assert.equal(result.state.status, expectedStatus);
     assert.deepEqual(result.effects, [{ type: "FINALIZE_WORKFLOW", decision }]);
   }
+
+  const definition = contract();
+  let state = stateAtDecision(definition);
+  const dispatched = event(state, "decision", "TURN_DISPATCHED");
+  state = reduceWorkflow(state, dispatched, definition).state;
+  const invalid = reduceWorkflow(
+    state,
+    event(state, "decision", "FINAL_DECISION", { inReplyTo: dispatched.eventId, payload: { decision: "defer" } }),
+    definition
+  );
+  assert.equal(invalid.accepted, false);
+  assert.equal(invalid.error.code, "FINAL_DECISION_INVALID");
+  assert.equal(invalid.state, state);
 });
 
 test("a parallel completion that does not activate another phase does not consume an automatic hop", () => {

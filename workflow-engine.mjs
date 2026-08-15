@@ -156,6 +156,7 @@ export function reduceWorkflow(current, event, contract) {
     }
   } else if (event.type === "FINAL_DECISION") {
     if (event.phaseId !== contract.finalPhaseId || !["RUNNING", "DISPATCHED"].includes(phase.status) || event.inReplyTo !== phase.dispatchedEventId) return reject(current, "FINAL_DECISION_INVALID");
+    if (!["pass", "approved", "reject"].includes(event.payload?.decision)) return reject(current, "FINAL_DECISION_INVALID");
     phase.status = "APPROVED";
     phase.acceptedEventId = event.eventId;
     const passed = event.payload?.decision === "pass" || event.payload?.decision === "approved";
