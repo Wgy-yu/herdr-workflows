@@ -7,13 +7,25 @@ function clone(value) {
 }
 
 function phaseState(status = "PENDING") {
-  return { status, attempt: 1, dispatchedEventId: null, acceptedEventId: null, report: null };
+  return {
+    status,
+    attempt: 1,
+    dispatchedEventId: null,
+    acceptedEventId: null,
+    report: null,
+    supersededAttempts: [],
+    supersededReports: [],
+  };
 }
 
-export function readyPhaseIds(state, contract) {
+function activatablePendingPhaseIds(state, contract) {
   return Object.entries(contract.phases)
     .filter(([id, phase]) => state.phases[id]?.status === "PENDING" && phase.needs.every((need) => state.phases[need]?.status === "APPROVED"))
     .map(([id]) => id);
+}
+
+export function readyPhaseIds(state, contract) {
+  return Object.keys(contract.phases).filter((id) => state.phases[id]?.status === "READY");
 }
 
 export function createWorkflowState(contract, entryMode = "do") {
@@ -32,7 +44,7 @@ export function createWorkflowState(contract, entryMode = "do") {
     lastError: null,
     phases,
   };
-  for (const id of readyPhaseIds(state, contract)) state.phases[id].status = "READY";
+  for (const id of activatablePendingPhaseIds(state, contract)) state.phases[id].status = "READY";
   return state;
 }
 
@@ -43,7 +55,11 @@ function reject(state, code, message = code) {
 function block(state, code, message = code) {
   state.status = "BLOCKED";
   state.lastError = { code, message };
-  return { state, effects: [{ type: "BLOCK_WORKFLOW", code }], accepted: true };
+  return {
+    state,
+    effects: [{ type: "BLOCK_WORKFLOW", code }, { type: "NOTIFY_LEADER", code }],
+    accepted: true,
+  };
 }
 
 function validateEvent(state, event, contract) {
@@ -55,11 +71,15 @@ function validateEvent(state, event, contract) {
   const phase = event.phaseId ? state.phases[event.phaseId] : null;
   if (phase && event.attempt !== phase.attempt) return "ATTEMPT_MISMATCH";
   if (event.phaseId && event.role !== contract.phases[event.phaseId].role) return "ROLE_MISMATCH";
+  const callbackTypes = ["PHASE_COMPLETED", "CHANGES_REQUESTED", "FINAL_DECISION", contract.phases[event.phaseId]?.callback?.type];
+  if (phase?.callbackTokenHash && callbackTypes.includes(event.type) && event.callbackTokenHash !== phase.callbackTokenHash) {
+    return "CALLBACK_TOKEN_MISMATCH";
+  }
   return null;
 }
 
 function makeReady(state, contract, effects) {
-  for (const id of readyPhaseIds(state, contract)) {
+  for (const id of activatablePendingPhaseIds(state, contract)) {
     state.phases[id].status = "READY";
     effects.push({ type: "DISPATCH_PHASE", phaseId: id, attempt: state.phases[id].attempt });
   }
@@ -84,38 +104,55 @@ export function reduceWorkflow(current, event, contract) {
   } else if (event.type === "TURN_STARTED") {
     if (phase.status !== "DISPATCHED" || event.inReplyTo !== phase.dispatchedEventId) return reject(current, "CAUSATION_INVALID");
     phase.status = "RUNNING";
-  } else if (event.type === "PHASE_BLOCKED") {
+  } else if (event.type === "PHASE_BLOCKED" || event.type === "BLOCKED") {
     if (!["DISPATCHED", "RUNNING"].includes(phase.status)) return reject(current, "PHASE_STATE_INVALID");
     phase.status = "BLOCKED";
     state.processedEventIds.push(event.eventId);
     state.lastEventId = event.eventId;
     return block(state, "PHASE_BLOCKED", event.payload?.reason);
-  } else if (event.type === "PHASE_COMPLETED") {
+  } else if (event.type === "PHASE_COMPLETED" || (event.type === definition.callback.type && definition.kind !== "decision")) {
     if (!["RUNNING", "DISPATCHED"].includes(phase.status) || event.inReplyTo !== phase.dispatchedEventId) return reject(current, "CAUSATION_INVALID");
-    if (state.automaticHops >= contract.maxAutoHops) {
-      state.processedEventIds.push(event.eventId);
-      state.lastEventId = event.eventId;
-      return block(state, "AUTO_HOP_LIMIT");
-    }
     phase.status = "APPROVED";
     phase.acceptedEventId = event.eventId;
     phase.report = event.payload?.report ?? null;
-    state.automaticHops += 1;
     if (definition.kind === "rework" && event.payload?.required === true) {
       if (state.reworkCount >= contract.maxRework) {
         state.processedEventIds.push(event.eventId);
         state.lastEventId = event.eventId;
         return block(state, "REWORK_LIMIT");
       }
+      if (state.automaticHops >= contract.maxAutoHops) {
+        state.processedEventIds.push(event.eventId);
+        state.lastEventId = event.eventId;
+        return block(state, "AUTO_HOP_LIMIT");
+      }
       state.reworkCount += 1;
+      state.automaticHops += 1;
       for (const [id, candidate] of Object.entries(contract.phases)) {
         if (candidate.kind !== "implementation") continue;
-        state.phases[id] = phaseState("READY");
-        state.phases[id].attempt = current.phases[id].attempt + 1;
-        effects.push({ type: "DISPATCH_PHASE", phaseId: id, attempt: state.phases[id].attempt });
+        const previous = state.phases[id];
+        const retry = phaseState("READY");
+        retry.attempt = previous.attempt + 1;
+        retry.supersededAttempts = [...previous.supersededAttempts, previous.attempt];
+        retry.supersededReports = [...previous.supersededReports, { attempt: previous.attempt, report: previous.report }];
+        state.phases[id] = retry;
+        effects.push({ type: "DISPATCH_PHASE", phaseId: id, attempt: retry.attempt });
       }
     } else {
+      const activatable = activatablePendingPhaseIds(state, contract);
+      if (activatable.length > 0 && state.automaticHops >= contract.maxAutoHops) {
+        state.processedEventIds.push(event.eventId);
+        state.lastEventId = event.eventId;
+        return block(state, "AUTO_HOP_LIMIT");
+      }
+      if (activatable.length > 0) state.automaticHops += 1;
       makeReady(state, contract, effects);
+      if (activatable.length === 0 && Object.entries(contract.phases).some(([id, candidate]) => {
+        const phaseState = state.phases[id];
+        return phaseState.status === "PENDING" && candidate.needs.some((need) => state.phases[need].status === "APPROVED");
+      })) {
+        state.status = "WAITING_FOR_JOIN";
+      }
     }
   } else if (event.type === "FINAL_DECISION") {
     if (event.phaseId !== contract.finalPhaseId || !["RUNNING", "DISPATCHED"].includes(phase.status) || event.inReplyTo !== phase.dispatchedEventId) return reject(current, "FINAL_DECISION_INVALID");
