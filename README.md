@@ -1,7 +1,8 @@
 # herdr-workflows
 
-`herdr-workflows` 是一个外置的 Codex Plugin + Herdr Plugin，用于配置和运行多 Agent 工作流。
-它不修改官方 Herdr，Leader、实施者和审查者可以通过 Herdr 直接通信。
+`herdr-workflows` 是一个 Codex Agent Plugin，用于配置和运行基于 Herdr 的多 Agent 工作流。
+用户通过 Agent Skill 交互；随附的 Herdr 事件桥只提供后台生命周期唤醒和认证回调，不承担
+模板选择、角色配置或其他用户交互，也不修改官方 Herdr。
 
 ## 能做什么
 
@@ -26,7 +27,7 @@ codex plugin add herdr-workflows@wgy-workflows
 
 安装或升级后，新建一个 Codex 任务以加载最新 Skill。
 
-### 安装 Herdr 事件桥接
+### 安装运行时事件桥
 
 在 Herdr 管理的 Agent 窗格中执行：
 
@@ -180,22 +181,9 @@ herdr agent list
 $herdr-workflows:init
 ```
 
-实际配置由 Herdr 插件 CLI Action 完成。先在 Herdr 中打开目标项目和所需 Agent，再按模板执行：
-
-```powershell
-# 常规开发（init 是该 Action 的兼容别名）
-herdr plugin action invoke wgy.herdr-workflows-bridge.init-development
-
-# 前后端并行
-herdr plugin action invoke wgy.herdr-workflows-bridge.init-frontend-backend
-
-# 只读审查
-herdr plugin action invoke wgy.herdr-workflows-bridge.init-review-only
-```
-
-Action 会从当前 workspace 选择 Agent，并通过结构化工具生成 `.herdr/workflows.yaml`，用户和
-Codex 都不需要手工配置。若 Agent 数量不足，日志返回 `INIT_INPUT_REQUIRED`、可用 Agent 和
-缺失角色，不写入半成品配置。Codex 中的 `$herdr-workflows:init`（或 `$init`）只是代用户调用上述 CLI Action。
+`$herdr-workflows:init`（或界面显示的简写 `$init`）会在 Codex 对话中询问模板、角色和
+Superpowers 选项，然后由 Agent Plugin 使用结构化工具生成并校验 `.herdr/workflows.yaml`。
+用户不需要执行 Herdr Action，也不需要手工编辑配置。
 
 ## 项目配置
 
@@ -253,7 +241,7 @@ role_rotation:
 `wgy.herdr-workflows-bridge` 已注册；否则输出 `EVENT_BRIDGE_REQUIRED` 并停止，不会退回
 终端轮询。`do` 与 `goal` 都通过该插件持久化同一工作流契约。
 
-## 原生事件驱动编排
+## Agent 插件编排与事件桥
 
 `do` 与 `goal` 共用同一编排引擎和 `.herdr/workflow/contract.json`，每个仓库只允许一个活动工作流。内置模板：
 
@@ -263,16 +251,15 @@ role_rotation:
 
 项目配置可以替换 `roles.<role>.agent`，也可以在模板基础上提供受限 `phases`。实施角色必须声明非空且互不重叠的 `writable_paths` 和必跑测试；Reviewer 业务源码只读。结构化 callback、范围检查、返修上限和最终 Leader 裁决不可关闭。
 
-初始化、启动、回调和恢复都使用插件 Actions：
+以下 Herdr Actions 是 Agent Plugin 和各阶段 Agent 使用的内部运行时接口：
 
 ```powershell
-herdr plugin action invoke wgy.herdr-workflows-bridge.init-development
 herdr plugin action invoke wgy.herdr-workflows-bridge.dispatch
 herdr plugin action invoke wgy.herdr-workflows-bridge.callback
 herdr plugin action invoke wgy.herdr-workflows-bridge.repair
 ```
 
-日常实际使用不需要手工调用这些 Action。在 Codex 中输入
+用户不需要手工调用这些 Actions。在 Codex 中输入
 `$herdr-workflows:do <你的任务>`（或简写 `$do <你的任务>`），入口会把任务写入
 `.herdr/workflow-request.md` 并调用 `dispatch`；Action 成功接收后会把请求持久化到
 `.herdr/workflow/request.md`。

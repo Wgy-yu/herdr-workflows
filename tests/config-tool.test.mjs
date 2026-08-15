@@ -110,8 +110,10 @@ test("init 入口声明配置、Superpowers 与 Agent 直连能力", () => {
   assert.match(workflowsSkill, /final_decision_required: true/);
   assert.match(workflowsSkill, /\.herdr\/workflow-request\.md/);
   assert.match(initSkill, /无需手工创建 YAML/);
-  assert.match(initSkill, /init-\*/);
-  assert.match(initSkill, /不得绕过 Action 直接代写/);
+  assert.match(initSkill, /Agent Skill/);
+  assert.match(workflowsSkill, /本仓库的产品入口是 Codex Agent Plugin/);
+  assert.match(workflowsSkill, /config-tool\.mjs update/);
+  assert.doesNotMatch(workflowsSkill, /init-frontend-backend/);
 });
 
 test("do 和 goal 在无参数 Action 派发前写入真实任务请求", () => {

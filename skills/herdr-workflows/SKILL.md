@@ -60,9 +60,10 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
   远程 Shell。命令、目标和等待范围必须由用户任务授权，涉及安装、删除、覆盖、外部服务
   或秘密时仍按权限门禁处理。
 
-## Herdr 原生事件桥接（do/goal 共用）
+## Herdr 运行时事件桥（do/goal 共用）
 
-- `herdr-plugin.toml` 注册模板化 `init-*`、`dispatch`、`callback`、`repair` Actions 和 `pane.agent_status_changed`。
+- 本仓库的产品入口是 Codex Agent Plugin 的 Skill。Herdr 插件不是用户交互入口，只注册
+  `dispatch`、`callback`、`repair` Actions 和 `pane.agent_status_changed`，承接后台事件驱动。
 - 运行前用 `herdr plugin list --plugin wgy.herdr-workflows-bridge` 确认无 manifest warning。
 - 生命周期事件只写入 `.herdr/workflow/events.jsonl` 审计并唤醒引擎；语义推进只接受认证 callback。
 - 插件通过官方 Socket API 定位当前工作区 Agent。消息只包含关联元数据和契约路径。
@@ -140,17 +141,15 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
    `install` 时，逐个展示来源与命令，取得该 Agent 的单独确认后，通过无等待的 `agent.prompt`
    发送安装指令并记录已下发；后续由用户再次运行 `check` 或由事件通知确认结果；`install: null` 时只展示官方说明并标记为待用户手动
    完成，禁止自行拼接安装命令或宣称已安装。
-5. 项目初始化只调用已安装插件的 CLI Action，不由 Codex 手工写配置。按模板调用：
-   `herdr plugin action invoke wgy.herdr-workflows-bridge.init-development`、
-   `init-frontend-backend` 或 `init-review-only`；`init` 是 `init-development` 的兼容别名。
-   Action 查询当前 workspace 的 Agent，并用结构化配置工具创建或更新
-   `<repo>/.herdr/workflows.yaml`。
-6. 读取插件日志中的结构化结果。`INIT_READY` 必须包含模板、角色映射和配置路径；
-   `INIT_INPUT_REQUIRED` 必须包含可用 Agent 与缺失角色，且不会写入半成品配置。前后端模板的
-   `frontend`、`backend` 必须绑定不同 Agent；所有模板固定写入
-   `event_bridge_required: true`、`structured_callbacks_required: true`、
-   `scope_checks_required: true`、`final_decision_required: true`。
-7. Action 内部完成项目校验；输出项目工作流、角色映射、Superpowers
+5. Codex 使用 `scripts/config-tool.mjs update` 创建或更新 `<repo>/.herdr/workflows.yaml`，
+   写入 `default_workflow`、模板、用户确认的 `roles.<role>.agent`、`use_superpowers`、
+   `max_rework`，以及固定门禁 `event_bridge_required: true`、
+   `structured_callbacks_required: true`、`scope_checks_required: true`、
+   `final_decision_required: true`。
+   写入前展示变更摘要；只更新用户确认字段，保留已有配置和未知字段。
+6. 运行 `config-tool.mjs validate --scope project` 和 `config-tool.mjs merge`。前后端模板的
+   `frontend`、`backend` 必须绑定不同 Agent，并保留模板定义的非重叠写入范围。
+7. 输出项目工作流、角色映射、Superpowers
    状态及待办。只有所选模板的全部必需角色已明确绑定、配置校验通过且
    （`use_superpowers=true` 时）安装门禁满足时才输出 `INIT_READY`；
    否则输出 `INIT_INCOMPLETE` 和阻塞项。除非用户明确指定立即运行，否则初始化到此结束。
