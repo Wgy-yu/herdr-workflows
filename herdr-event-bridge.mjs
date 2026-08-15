@@ -132,25 +132,23 @@ function roleLabel(role) {
 }
 
 /** 生成发送给目标 Agent 的短通知，正文不要求 Leader 参与转发。 */
-export function buildNotification({ fromRole, toRole, reason, event, ledgerPath, planPath, planContent }) {
+export function buildNotification({ fromRole, toRole, reason, event, ledgerPath, planPath, reviewPath }) {
   const action =
     reason === "implementation_done"
-      ? "请直接开始审查，不要等待 Leader 转发。"
+      ? "请读取共享计划并开始只读审查，将完整结论写入审核结果文件后结束回合，不要等待 Leader 转发。"
       : reason === "review_done"
-        ? "请直接读取评审单并作出最终裁决，不要等待 Codex 中间转发。"
+        ? "请读取审核结果文件并作出最终裁决，不要等待 Codex 中间转发。"
         : "请直接处理阻塞原因并决定下一步，不要等待其他 Agent 转发。";
-  const notification = [
+  return [
     "【Herdr Workflows 自动通知】",
     `${roleLabel(fromRole)}已达到 ${event.status} 状态。`,
     `当前路由：${roleLabel(fromRole)} → ${roleLabel(toRole)}。`,
     `pane=${event.paneId ?? "unknown"}，workspace=${event.workspaceId ?? "unknown"}。`,
     action,
+    `共享工作计划：${planPath ?? "workflow-plan.md"}`,
+    `审核结果文件：${reviewPath ?? "workflow-review.md"}`,
     `共享事件记录：${ledgerPath}`,
-  ];
-  if (planContent) {
-    notification.push(`共享工作计划（请以此为准）：${planPath ?? "workflow-plan.md"}\n${planContent}`);
-  }
-  return notification.join(" ");
+  ].join(" ");
 }
 
 /** 只对带有 Herdr 状态序号的事件去重，避免吞掉没有序号的合法后续事件。 */
@@ -440,11 +438,24 @@ export async function handleEvent(options = {}) {
     if (hasDeliveredEvent(ledgerPath, key)) {
       return { handled: false, reason: "duplicate-event", event, route, eventKey: key };
     }
+    const reviewPath = join(projectRoot, ".herdr", "reviews", `${workflowState.runId}.md`);
+    if (route.reason === "review_done") {
+      const hasReviewOutput = existsSync(reviewPath) && readFileSync(reviewPath, "utf8").trim() !== "";
+      if (!hasReviewOutput) {
+        const message = `【Herdr Workflows 审核结果缺失】 请将完整审核结论写入审核结果文件后结束回合：${reviewPath}`;
+        let delivered = false;
+        try {
+          await request("agent.prompt", { target: event.paneId, text: message });
+          delivered = true;
+        } catch {}
+        appendLedger(ledgerPath, { at: new Date().toISOString(), type: "review_output_missing", eventKey: key, event, route, target: event.paneId, reviewPath, delivered, workflowStatus: workflowState.status });
+        return { handled: false, reason: "review-output-missing", event, route, target: event.paneId, reviewPath, delivered, workflowStatus: workflowState.status };
+      }
+    }
     const targetAgent = workflow[route.toRole];
     const target = findAgentTarget(agents, targetAgent, event.workspaceId);
     const planPath = join(projectRoot, ".herdr", "workflow-plan.md");
-    const planContent = existsSync(planPath) ? readFileSync(planPath, "utf8").trim() : "";
-    const message = buildNotification({ ...route, event, ledgerPath, planPath, planContent });
+    const message = buildNotification({ ...route, event, ledgerPath, planPath, reviewPath });
     try {
       if (!target || target === event.paneId) throw new Error("当前 workspace 中找不到目标 Agent");
       await request("agent.prompt", { target, text: message });

@@ -237,12 +237,15 @@ role_rotation:
 herdr plugin action invoke wgy.herdr-workflows-bridge.dispatch
 ```
 
-Action 只执行 `agent.list` 和不带等待参数的 `agent.prompt`，下发成功后立即退出。当前阶段
+Action 只执行 `agent.list` 和不带等待参数的短 `agent.prompt`；消息只包含共享计划路径，
+不内联计划正文。下发成功后立即退出。当前阶段
 原子写入 `<repo>/.herdr/workflow-state.json`，后续只有官方 Herdr 状态事件可以迁移阶段：
 
 1. `READY` → dispatch → `IMPLEMENTATION_RUNNING`。
-2. 实施者 `done` → `REVIEW_RUNNING`，直接通知审查者。
-3. 审查者 `done` → `FINAL_DECISION_PENDING`，直接通知 Leader 裁决。
+2. 实施者 `done` → `REVIEW_RUNNING`，通知审查者把完整结论写入
+   `<repo>/.herdr/reviews/<runId>.md`。
+3. 审查者 `done` 且审核结果文件非空 → `FINAL_DECISION_PENDING`，只把文件路径和结束状态
+   通知 Leader 裁决；文件缺失时保持 `REVIEW_RUNNING` 并短消息唤回审查者。
 4. 实施者或审查者 `blocked` → `BLOCKED`，直接通知 Leader。
 
 处于错误阶段的完成事件会返回 `workflow-state-not-routable`，不能靠终端读取、自报文本或
@@ -254,8 +257,8 @@ Action 只执行 `agent.list` 和不带等待参数的 `agent.prompt`，下发�
 
 桥接启用后：
 
-1. 实施者进入 `done`：直接通知审查者读取共享评审单并开始审查。
-2. 审查者进入 `done`：直接通知 Leader 读取评审单并进行最终裁决。
+1. 实施者进入 `done`：直接通知审查者读取共享计划，并把完整审核结论写入本轮审核结果文件。
+2. 审查者进入 `done`：审核文件非空后，只向 Leader 发送结束消息、审核文件路径和状态路径。
 3. 实施者或审查者进入 `blocked`：直接通知 Leader 处理阻塞。
 4. 目标 Agent 不可用：退回 Herdr `notification.show`，不让 Leader 充当消息中继。
 5. 事件状态不匹配或重复时拒绝迁移，不通知下一角色。
@@ -269,7 +272,7 @@ herdr plugin log list --plugin wgy.herdr-workflows-bridge --limit 50
 ## 评审与开发约束
 
 - `review` 模式只允许创建或追加共享 Markdown 评审单，不修改业务源码。
-- Reviewer 始终只读；最大权限参数不等于业务写权限。
+- Reviewer 对业务源码始终只读；只允许写入本轮 `.herdr/reviews/<runId>.md` 审核结果文件。
 - Agent 之间直接发送交接信息，长篇证据写入评审单或事件记录。
 - Leader 保留最终裁决，不因事件桥接而取消验收责任。
 

@@ -78,3 +78,16 @@
 - [ ] Add failing tests for concurrent transitions, dispatch/BLOCKED ledger entries, and a new `runId` per workflow.
 - [ ] Implement project locking, delivery-before-commit ordering, and run-scoped fallback keys.
 - [ ] Run all Node, PowerShell, structure, and syntax checks.
+
+### Task 6: Short file-based handoffs
+
+**Files:**
+- Modify: `herdr-workflow-dispatch.mjs`
+- Modify: `herdr-event-bridge.mjs`
+- Modify: `tests/herdr-workflow-dispatch.test.mjs`
+- Modify: `tests/herdr-event-bridge.test.mjs`
+
+- [x] Add failing tests proving dispatch and event handoffs do not inline long plan content.
+- [x] Add a failing test proving a missing `.herdr/reviews/<runId>.md` keeps the workflow in `REVIEW_RUNNING`.
+- [x] Send only plan, review, and event-ledger paths; reprompt the reviewer when the review file is missing.
+- [x] Run the focused bridge and dispatch tests.

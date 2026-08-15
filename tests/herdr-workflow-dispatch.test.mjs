@@ -29,7 +29,8 @@ test("dispatch 读取共享计划、无等待通知实施者并立即进入实�
     assert.equal(result.status, "IMPLEMENTATION_RUNNING");
     assert.deepEqual(calls.map((call) => call.method), ["agent.list", "agent.prompt"]);
     assert.equal("wait" in calls[1].params, false);
-    assert.match(calls[1].params.text, /完成真实事件桥/);
+    assert.match(calls[1].params.text, /workflow-plan\.md/);
+    assert.doesNotMatch(calls[1].params.text, /完成真实事件桥/);
     assert.equal(readWorkflowState(root).status, "IMPLEMENTATION_RUNNING");
   } finally {
     rmSync(root, { recursive: true, force: true });

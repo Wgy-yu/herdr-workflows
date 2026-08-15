@@ -69,7 +69,10 @@ description: 通过外置 Herdr Workflows 插件配置并运行可移植的多�
   `herdr-event-bridge.mjs`。桥接读取项目 `.herdr/workflows.yaml`，通过官方 Socket API
   的 `agent.list` 找到配置角色，再用 `agent.prompt` 直接通知目标 Agent：实施者完成后直达
   审查者，审查者完成后直达 Leader，任一角色阻塞时直达 Leader。
-- 通知正文只包含状态、角色、pane/workspace 和共享事件记录路径；长篇证据仍写入评审单。
+- 通知正文只包含状态、角色、pane/workspace、共享计划路径、审核结果路径和共享事件记录路径，
+  禁止内联计划或审核正文。`mode=do` 的审查者把完整结论写入
+  `<repo>/.herdr/reviews/<runId>.md`；文件缺失或为空时保持 `REVIEW_RUNNING` 并短消息唤回
+  审查者，只有文件有效后才通知 Leader。
   事件会追加到 `<repo>/.herdr/workflow-events.jsonl`，带 Herdr 状态序号的重复事件不会重复
   通知。目标 Agent 暂时不可用时，桥接退回官方 `notification.show`，不会让 Leader 充当中继。
 - 该桥接只处理已明确配置三类角色的项目；角色未配置、项目配置不存在或事件不是可路由状态时
@@ -235,12 +238,14 @@ init 按“本机 Agent 配置（mode=config）→ 项目工作流配置（mode=
    `herdr plugin action invoke wgy.herdr-workflows-bridge.dispatch`。不得由 Leader 直接调用
    `agent.prompt` 下发实施任务；Action 负责无等待下发、写入 `IMPLEMENTATION_RUNNING` 后立即退出。
 4. 实施者修改代码并提供 diff 与验证证据。
-5. 审核者只读复核；当 `workflow.useSuperpowers=true` 时，Leader 使用
+5. 审核者对业务源码只读复核，把完整结论写入本轮
+   `<repo>/.herdr/reviews/<runId>.md`，然后结束回合；事件桥只把该路径和结束消息发给 Leader。
+   文件缺失或为空时不得推进到最终裁决。当 `workflow.useSuperpowers=true` 时，Leader 使用
    `superpowers:receiving-code-review` 验证审查意见，不盲从审核结论；关闭时跳过该 Skill，
    仍保留审查和最终裁决门禁。
 6. 已确认问题返回实施者返修；达到工作流 `max_rework` 上限后由 `takeover_on_exceed`
    指定的接管者处理，不再自动返修。
-7. 审核者通过后，Leader 独立运行项目检查并作最终裁决。
+7. 审核者通过后，Leader 读取本轮审核结果文件，独立运行项目检查并作最终裁决。
 8. 实施者与审核者可通过 Herdr 点对点消息直接澄清证据、交接复核和反馈返修，不由 Leader
    转发正文；双方不得自行宣布流程结束，实质结论必须对 Leader 可审计，且不得取消 Leader
    最终裁决。用户可动态指定 Agent 分工。

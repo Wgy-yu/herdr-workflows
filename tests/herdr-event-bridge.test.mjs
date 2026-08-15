@@ -93,19 +93,26 @@ test("阻塞事件直接通知 Leader，未知状态不路由", () => {
   );
 });
 
-test("通知正文明确要求目标 Agent 读取共享状态并继续", () => {
+test("通知正文只传共享文件路径，不内联长计划正文", () => {
   const message = buildNotification({
     fromRole: "implementer",
     toRole: "reviewer",
     reason: "implementation_done",
     event: { agent: "opencode", status: "done", paneId: "w1:p2", workspaceId: "w1" },
     ledgerPath: "D:/repo/.herdr/workflow-events.jsonl",
+    planPath: "D:/repo/.herdr/workflow-plan.md",
+    reviewPath: "D:/repo/.herdr/reviews/run-1.md",
+    planContent: "不应进入通知正文".repeat(1000),
   });
 
   assert.match(message, /实施者/);
   assert.match(message, /审查者/);
   assert.match(message, /workflow-events\.jsonl/);
+  assert.match(message, /workflow-plan\.md/);
+  assert.match(message, /reviews\/run-1\.md/);
+  assert.doesNotMatch(message, /不应进入通知正文/);
   assert.match(message, /不要等待 Leader 转发/);
+  assert.ok(Buffer.byteLength(message, "utf8") < 1000);
 });
 
 test("事件键优先使用 Herdr 状态序号，避免重复通知", () => {
@@ -228,7 +235,10 @@ test("事件处理通过官方 agent.prompt 直达下一角色并写入共享记
 
     assert.equal(result.delivery, "agent.prompt");
     assert.equal(calls.some((call) => call.method === "agent.prompt" && call.params.target === "w1:p3"), true);
-    assert.match(calls.find((call) => call.method === "agent.prompt").params.text, /只审查当前工作树/);
+    const reviewerPrompt = calls.find((call) => call.method === "agent.prompt");
+    assert.match(reviewerPrompt.params.text, /workflow-plan\.md/);
+    assert.match(reviewerPrompt.params.text, /\.herdr[\\/]reviews[\\/].+\.md/);
+    assert.doesNotMatch(reviewerPrompt.params.text, /只审查当前工作树/);
     const ledger = readFileSync(join(configDir, "workflow-events.jsonl"), "utf8");
     assert.match(ledger, /implementation_done/);
     assert.match(ledger, /agent\.prompt/);
@@ -283,6 +293,54 @@ test("未通过 dispatch 启动时 done 事件不能推进工作流", async () =
     assert.equal(calls.includes("agent.prompt"), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("审核结果文件缺失时留在审查阶段并短消息唤回审核者", async () => {
+  const fixture = bridgeFixture("herdr-workflows-review-output-");
+  const calls = [];
+  try {
+    startWorkflow(fixture.project, "default");
+    const request = async (method, params) => {
+      calls.push({ method, params });
+      if (method === "agent.list") return { result: { agents: [
+        { name: "opencode", pane_id: "w1:p2", workspace_id: "w1" },
+        { name: "claude", pane_id: "w1:p3", workspace_id: "w1" },
+        { name: "codex-leader", pane_id: "w1:p1", workspace_id: "w1" },
+      ] } };
+      return { result: { ok: true } };
+    };
+    await handleEvent({ env: fixture.env, request });
+    assert.equal(readWorkflowState(fixture.project).status, "REVIEW_RUNNING");
+
+    const reviewEvent = {
+      ...fixture.env,
+      HERDR_PLUGIN_EVENT_JSON: JSON.stringify({
+        type: "pane_agent_status_changed",
+        pane_id: "w1:p3",
+        workspace_id: "w1",
+        agent: "claude",
+        agent_status: "done",
+      }),
+    };
+    const missing = await handleEvent({ env: reviewEvent, request });
+    assert.equal(missing.reason, "review-output-missing");
+    assert.equal(readWorkflowState(fixture.project).status, "REVIEW_RUNNING");
+    const retryPrompt = calls.filter((call) => call.method === "agent.prompt").at(-1);
+    assert.equal(retryPrompt.params.target, "w1:p3");
+    assert.match(retryPrompt.params.text, /审核结果文件/);
+
+    const state = readWorkflowState(fixture.project);
+    const reviewDir = join(fixture.project, ".herdr", "reviews");
+    mkdirSync(reviewDir, { recursive: true });
+    writeFileSync(join(reviewDir, `${state.runId}.md`), "REVIEW_PASS", "utf8");
+    const delivered = await handleEvent({ env: reviewEvent, request });
+    assert.equal(delivered.workflowStatus, "FINAL_DECISION_PENDING");
+    const leaderPrompt = calls.filter((call) => call.method === "agent.prompt").at(-1);
+    assert.equal(leaderPrompt.params.target, "w1:p1");
+    assert.match(leaderPrompt.params.text, new RegExp(`${state.runId}\\.md`));
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
   }
 });
 

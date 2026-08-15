@@ -50,7 +50,7 @@ export async function dispatchWorkflow(options) {
     try {
       await request("agent.prompt", {
         target,
-        text: `【Herdr Workflows 实施任务】\n共享计划：${planPath}\n\n${plan}`,
+        text: `【Herdr Workflows 实施任务】 请读取共享计划并开始实施：${planPath}`,
       });
     } catch (error) {
       appendWorkflowEvent(projectRoot, { type: "dispatch_failed", status: current.status, error: error.message });
