@@ -1,6 +1,6 @@
 id = "wgy.herdr-workflows-bridge"
 name = "Herdr Workflows Event Bridge"
-version = "0.2.4"
+version = "0.3.0"
 min_herdr_version = "0.7.0"
 description = "Route Herdr agent completion and blocked events directly between configured workflow roles."
 platforms = ["linux", "macos", "windows"]
@@ -14,3 +14,15 @@ id = "dispatch"
 title = "Dispatch workflow plan"
 contexts = ["workspace"]
 command = ["node", "herdr-workflow-dispatch.mjs"]
+
+[[actions]]
+id = "callback"
+title = "Submit structured workflow callback"
+contexts = ["workspace"]
+command = ["node", "herdr-workflow-callback.mjs"]
+
+[[actions]]
+id = "repair"
+title = "Repair workflow projections from events"
+contexts = ["workspace"]
+command = ["node", "herdr-workflow-repair.mjs"]
